@@ -4,6 +4,13 @@ All notable changes to this project are documented here. Entries are generated b
 [release-please](https://github.com/googleapis/release-please) from commit messages, and the project uses
 [Semantic Versioning](https://semver.org).
 
+## [0.1.1](https://github.com/viztfxyz/blinkit-tool/compare/v0.1.0...v0.1.1) (2026-10-25)
+
+
+### Bug Fixes
+
+* make npx blinkit-tool work and document installing from npm ([#6](https://github.com/viztfxyz/blinkit-tool/issues/6)) ([4299ab2](https://github.com/viztfxyz/blinkit-tool/commit/4299ab25958afd87c9b8aa7d2d3b3aa5587a0583))
+
 ## [0.1.0](https://github.com/viztfxyz/blinkit-tool/releases/tag/v0.1.0) (2026-10-25)
 
 First public release.

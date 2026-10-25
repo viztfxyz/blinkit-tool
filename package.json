@@ -1,6 +1,6 @@
 {
   "name": "blinkit-tool",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Unofficial Blinkit client: search, cart, checkout and UPI pay, as a CLI, library and MCP server",
   "keywords": [
     "blinkit",
