@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "blinkit": {
+      "command": "npx",
+      "args": ["-y", "tsx", "src/bin/blinkit-mcp.ts"],
+      "cwd": "${workspaceFolder}"
+    }
+  }
+}

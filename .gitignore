@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+.env
+.env.*
+.cursor/hooks/state/
+coverage/
+.vite/.claude/settings.local.json
+*.tmp
