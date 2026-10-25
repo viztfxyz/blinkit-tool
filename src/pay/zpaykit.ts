@@ -79,7 +79,7 @@ export async function prepareOrder(bk: Blinkit, cartId: string): Promise<Prepare
   };
 }
 
-function commonForm(o: PreparedOrder, phone: string): Record<string, string> {
+export function commonForm(o: PreparedOrder, phone: string): Record<string, string> {
   return {
     service_type: "BLINKIT",
     country_id: "1",
@@ -107,7 +107,35 @@ function commonForm(o: PreparedOrder, phone: string): Record<string, string> {
   };
 }
 
-async function zpost(
+export type PaymentState = "paid" | "failed" | "pending";
+
+const PAID = new Set(["success", "successful", "paid", "completed", "captured"]);
+const FAILED = new Set(["failed", "failure", "cancelled", "canceled", "declined", "expired"]);
+
+/**
+ * zpaykit's verdict on a payment, read only from verifyPaymentStatus's `response.status`.
+ * Anything else (an error reply such as `{"status":400,"details":"Invalid track_id"}`, a network
+ * failure, a state we don't know) counts as pending: only an explicit answer may end the wait.
+ */
+export function paymentState(reply: Json): PaymentState {
+  const st = String(reply?.response?.status ?? "").toLowerCase();
+  if (PAID.has(st)) return "paid";
+  if (FAILED.has(st)) return "failed";
+  return "pending";
+}
+
+/** Seconds until the next status check: zpaykit's `poll_interval` (it asks for 10), within 3–30. */
+export function pollDelaySec(reply: Json): number {
+  const s = Number(reply?.response?.poll_interval);
+  return Number.isFinite(s) && s > 0 ? Math.min(30, Math.max(3, s)) : 5;
+}
+
+/** The status check identifies the payment by makePayment's track_id; without it zpaykit replies 400. */
+export function verifyForm(o: PreparedOrder, phone: string, trackId: string): Record<string, string> {
+  return { ...commonForm(o, phone), track_id: trackId };
+}
+
+export async function zpost(
   bk: Blinkit,
   client: CuimpHttp,
   path: string,
@@ -172,23 +200,26 @@ export async function payViaApi(bk: Blinkit, opts: PayOptions, progress: { run?:
   });
   const txn = mp?.response?.transaction;
   const upiIntent = txn?.qr_data?.data as string | undefined;
-  if (!upiIntent?.startsWith("upi:")) {
+  const trackId = txn?.track_id as string | undefined;
+  if (!upiIntent?.startsWith("upi:") || !trackId) {
     const status = String(txn?.status ?? mp?.response?.status ?? "unknown");
     throw new BlinkitError(
-      `makePayment did not return a UPI intent (status=${status}): ${JSON.stringify(mp).slice(0, 240)}`,
+      `makePayment did not return a UPI intent and track_id (status=${status}): ${JSON.stringify(mp).slice(0, 240)}`,
     );
   }
 
-  await run.ready({ cart, upiIntent, orderId: prepared.orderId, trackId: txn?.track_id });
+  await run.ready({ cart, upiIntent, orderId: prepared.orderId, trackId });
+  const form = verifyForm(prepared, phone, trackId);
   const deadline = Date.now() + (opts.timeoutSec ?? 600) * 1000;
   while (Date.now() < deadline) {
-    const r = await zpost(bk, client, "verifyPaymentStatus", prepared.pasToken, commonForm(prepared, phone)).catch(
-      () => undefined,
-    );
-    const st = String(r?.response?.status ?? r?.status ?? "pending").toLowerCase();
-    if (st.includes("success") || st === "paid") return run.finish("paid");
-    if (st.includes("fail") || st.includes("cancel")) return run.finish("failed");
-    await new Promise((res) => setTimeout(res, 2500));
+    const reply = await zpost(bk, client, "verifyPaymentStatus", prepared.pasToken, form).catch(() => undefined);
+    const state = paymentState(reply);
+    if (state === "paid") return run.finish("paid");
+    if (state === "failed") {
+      const why = reply?.response?.message ? String(reply.response.message) : undefined;
+      return run.finish("failed", why ? { error: why } : {});
+    }
+    await new Promise((res) => setTimeout(res, pollDelaySec(reply) * 1000));
   }
   return run.finish("timeout");
 }

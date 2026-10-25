@@ -8,7 +8,7 @@ import { paths } from "../src/core/config.js";
 import { BlinkitError } from "../src/core/errors.js";
 import { handOff, qrbatonOrder, qrbatonStatusFor } from "../src/pay/handoff.js";
 import { decodeQrPng, extractUpiIntent, upiIntentFromCapture } from "../src/pay/qr.js";
-import { prepareFailureMessage, prepareOrder } from "../src/pay/zpaykit.js";
+import { paymentState, pollDelaySec, prepareFailureMessage, prepareOrder, verifyForm } from "../src/pay/zpaykit.js";
 import type { Cart } from "../src/types.js";
 
 const qrOpts = { type: "png" as const, width: 280, margin: 2, errorCorrectionLevel: "M" as const };
@@ -261,5 +261,53 @@ describe("payWithUpi fallback", () => {
       /amount to pay is ₹120/,
     );
     expect(logs.join("\n")).not.toMatch(/falling back/);
+  });
+});
+
+describe("zpaykit payment status", () => {
+  // Real verifyPaymentStatus replies (2026-10-25).
+  const pending = {
+    response: {
+      status: "pending",
+      poll_interval: 10,
+      retry_count: 1,
+      message: "Please wait while we are processing your payment.",
+    },
+  };
+  const missingTrackId = {
+    status: 400,
+    message: "",
+    details: "Invalid track_id",
+    url_endpoint: "v2/sdk/verify_payment_status",
+  };
+
+  it("treats pending and error replies as still waiting, never as failed", () => {
+    expect(paymentState(pending)).toBe("pending");
+    expect(paymentState(missingTrackId)).toBe("pending");
+    expect(paymentState({ status: "failed", message: "bad request" })).toBe("pending");
+    expect(paymentState(undefined)).toBe("pending");
+    expect(paymentState({ response: { status: "something_new" } })).toBe("pending");
+  });
+
+  it("ends only on an explicit paid or failed status", () => {
+    expect(paymentState({ response: { status: "success" } })).toBe("paid");
+    expect(paymentState({ response: { status: "SUCCESS" } })).toBe("paid");
+    expect(paymentState({ response: { status: "failed" } })).toBe("failed");
+    expect(paymentState({ response: { status: "cancelled" } })).toBe("failed");
+  });
+
+  it("polls at zpaykit's requested interval, within limits", () => {
+    expect(pollDelaySec(pending)).toBe(10);
+    expect(pollDelaySec({ response: { poll_interval: 1 } })).toBe(3);
+    expect(pollDelaySec({ response: { poll_interval: 600 } })).toBe(30);
+    expect(pollDelaySec(missingTrackId)).toBe(5);
+  });
+
+  it("identifies the payment by track_id", () => {
+    const order = { cartId: "1", pasToken: "pas", orderHash: "", orderId: 42, payable: 151, paymentHash: "ph" };
+    const form = verifyForm(order, "9000000000", "ZTBLINUPIQR123");
+    expect(form.track_id).toBe("ZTBLINUPIQR123");
+    expect(form.order_id).toBe("42");
+    expect(form.amount).toBe("151");
   });
 });
