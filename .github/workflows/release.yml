@@ -2,11 +2,17 @@ name: Release
 
 # On every push to main, release-please keeps a "Release PR" open with the next version and changelog
 # (from Conventional Commit messages). Merging that PR tags the release, creates the GitHub release,
-# and publishes to npm here via trusted publishing (no npm token stored).
+# and publishes that tag to npm via trusted publishing (no npm token stored).
+# "Run workflow" with a tag republishes an existing release, e.g. if the npm upload failed.
 
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to publish to npm (e.g. v0.1.1)
+        required: true
 
 permissions:
   contents: write
@@ -19,9 +25,11 @@ concurrency:
 
 jobs:
   release-please:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
       - uses: googleapis/release-please-action@v5
         id: release
@@ -31,10 +39,14 @@ jobs:
 
   publish:
     needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
+    if: >-
+      always() &&
+      (needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.inputs.tag || needs.release-please.outputs.tag_name }}
       - uses: actions/setup-node@v5
         with:
           node-version: 24
@@ -43,5 +55,7 @@ jobs:
       - name: npm 11.5.1+ (needed for trusted publishing)
         run: npm install -g npm@latest
       - run: npm ci
-      - run: npm run check
+      # Formatting is checked on every PR; here, make sure the tagged code builds and passes its tests.
+      - run: npm run typecheck
+      - run: npm test
       - run: npm publish --access public
