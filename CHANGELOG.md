@@ -4,6 +4,13 @@ All notable changes to this project are documented here. Entries are generated b
 [release-please](https://github.com/googleapis/release-please) from commit messages, and the project uses
 [Semantic Versioning](https://semver.org).
 
+## [0.1.2](https://github.com/viztfxyz/blinkit-tool/compare/v0.1.1...v0.1.2) (2026-10-25)
+
+
+### Bug Fixes
+
+* **pay:** stop reporting "Payment failed" while the payment is pending ([#9](https://github.com/viztfxyz/blinkit-tool/issues/9)) ([4674306](https://github.com/viztfxyz/blinkit-tool/commit/4674306d96bc8b9cdd78c38e63908bd340688968))
+
 ## [0.1.1](https://github.com/viztfxyz/blinkit-tool/compare/v0.1.0...v0.1.1) (2026-10-25)
 
 
