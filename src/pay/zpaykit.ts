@@ -1,0 +1,194 @@
+/**
+ * UPI payment via Blinkit → Zomato zpaykit over plain HTTPS (Chrome-TLS impersonation):
+ *   1. GET  /createOrder/{cart_id}               → PAS token + orderHash
+ *   2. POST /zomato_payment_hash                 → payment_hash + numeric order_id
+ *   3. POST zomato.com/zpaykit/getPaymentMethods → laravel_session cookie
+ *   4. POST zomato.com/zpaykit/makePayment       → upi://pay?… intent (QR payload)
+ *   5. poll zpaykit/verifyPaymentStatus
+ */
+import type { CuimpHttp } from "cuimp";
+import type { Blinkit } from "../client.js";
+import { BlinkitError } from "../core/errors.js";
+import type { Json } from "../types.js";
+import { confirmedCheckout, type PayOptions, PayRun } from "./flow.js";
+import type { PayStatus } from "./status.js";
+
+const ZBASE = "https://www.zomato.com/zpaykit";
+const SNIPPET = 200;
+
+export interface PreparedOrder {
+  cartId: string;
+  pasToken: string;
+  orderHash: string;
+  orderId: number;
+  payable: number;
+  paymentHash: string;
+}
+
+export function prepareFailureMessage(call: string, status: number, body?: string, message?: string): string {
+  const snippet = (body ?? "").replace(/\s+/g, " ").trim().slice(0, SNIPPET);
+  const fallback = message && !/^HTTP \d+$/.test(message) ? message : "";
+  const tail = snippet || fallback;
+  return tail ? `${call} failed (HTTP ${status}): ${tail}` : `${call} failed (HTTP ${status})`;
+}
+
+function rewritePrepareError(call: string, error: unknown): Error {
+  if (error instanceof BlinkitError && error.status != null && error.status >= 400) {
+    return new BlinkitError(prepareFailureMessage(call, error.status, error.body, error.message));
+  }
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+async function prepareCall(
+  bk: Blinkit,
+  method: "GET" | "POST",
+  path: string,
+  opts: Parameters<Blinkit["req"]>[2],
+): Promise<Json> {
+  try {
+    return await bk.req(method, path, opts);
+  } catch (error) {
+    throw rewritePrepareError(`${method} ${path}`, error);
+  }
+}
+
+export async function prepareOrder(bk: Blinkit, cartId: string): Promise<PreparedOrder> {
+  const co = await prepareCall(bk, "GET", `/createOrder/${cartId}`, { needLogin: true });
+  const pasToken = co?.response?.access_token as string | undefined;
+  if (!pasToken) {
+    throw new BlinkitError(
+      "createOrder returned no PAS token — the cart may already have a pending payment. " +
+        "Clear the pending txn (or wait for it to expire), then retry.",
+    );
+  }
+  const ph = await prepareCall(bk, "POST", "/zomato_payment_hash", {
+    needLogin: true,
+    json: { cart_id: String(cartId), payment_info_data: { payment_method_id: 50, payment_method_type: "upi_qr" } },
+  });
+  const meta = ph?.zomato_payment_hash_meta;
+  if (!meta?.payment_hash || !meta?.order_id) {
+    throw new BlinkitError(`zomato_payment_hash failed: ${JSON.stringify(ph).slice(0, SNIPPET)}`);
+  }
+  return {
+    cartId: String(cartId),
+    pasToken,
+    orderHash: (co?.orderHash as string | undefined) ?? "",
+    orderId: Number(meta.order_id),
+    payable: Number(meta.payable_amount),
+    paymentHash: String(meta.payment_hash),
+  };
+}
+
+function commonForm(o: PreparedOrder, phone: string): Record<string, string> {
+  return {
+    service_type: "BLINKIT",
+    country_id: "1",
+    order_type: "null",
+    order_id: String(o.orderId),
+    amount: String(o.payable),
+    payments_hash: o.paymentHash,
+    host_redirect_url: `https://blinkit.com/zpay/${o.orderId}`,
+    phone,
+    email: `${phone}@blinkit.com`,
+    promo_code: "",
+    locale: "en",
+    gateway_info: "null",
+    online_payments_flag: "1",
+    isMobileView: "false",
+    additional_params: JSON.stringify({
+      block_payment_methods: [],
+      eligible_bank_codes: null,
+      emi_details: null,
+      hidden_payment_methods: [],
+      service_type: "BLINKIT",
+      show_warning_banner: 1,
+      user_details: { addressDetails: null },
+    }),
+  };
+}
+
+async function zpost(
+  bk: Blinkit,
+  client: CuimpHttp,
+  path: string,
+  pasToken: string,
+  form: Record<string, string>,
+): Promise<Json> {
+  const r = await bk.http.sendRaw(
+    client,
+    "POST",
+    `${ZBASE}/${path}`,
+    {
+      "x-client-pas-token": pasToken,
+      "content-type": "application/x-www-form-urlencoded",
+      locale: "en",
+      referer: "https://www.zomato.com/zpaykit/init",
+      origin: "https://www.zomato.com",
+    },
+    new URLSearchParams(form).toString(),
+  );
+  try {
+    return JSON.parse(r.text);
+  } catch {
+    return { status: r.status, raw: r.text.slice(0, 300) };
+  }
+}
+
+/**
+ * Headless UPI. `progress.run` is set once an order is being prepared (so a browser retry makes
+ * sense), and `progress.run.issued` once the payer may already have the QR (so it doesn't).
+ */
+export async function payViaApi(bk: Blinkit, opts: PayOptions, progress: { run?: PayRun }): Promise<PayStatus> {
+  const cart = await confirmedCheckout(bk, opts.confirmAmount);
+  const phone = bk.state.user?.phone;
+  if (!phone) throw new BlinkitError("session has no phone number; log in again with `blinkit login <phone>`");
+  const cartId = bk.state.cartId ?? cart.cartId;
+  if (!cartId) throw new BlinkitError("no server cart id; run `blinkit checkout` first");
+  const toPay = cart.bill.toPay;
+
+  const run = new PayRun(bk, opts, toPay);
+  progress.run = run;
+  run.status("launching");
+  run.log(`Preparing order for cart ${cartId}…`);
+  const prepared = await prepareOrder(bk, String(cartId));
+  if (Math.round(prepared.payable * 100) !== Math.round(toPay * 100)) {
+    throw new BlinkitError(`payment hash amount is ₹${prepared.payable} but checkout showed ₹${toPay}; aborting`);
+  }
+
+  const client = await bk.http.chromeClient();
+  run.log("Opening UPI payment session…");
+  await zpost(bk, client, "getPaymentMethods", prepared.pasToken, commonForm(prepared, phone));
+  if (opts.dryRun) {
+    run.log(`Dry run: payment session ready for ₹${toPay} (order ${prepared.orderId}).`);
+    return run.status("dry_run_ok", { orderId: prepared.orderId });
+  }
+
+  // The web app literally sends the string "[object Object]" for payments_config_params; omitting it fails.
+  const mp = await zpost(bk, client, "makePayment", prepared.pasToken, {
+    ...commonForm(prepared, phone),
+    payment_method_id: "50",
+    payment_method_type: "upi_qr",
+    payments_config_params: "[object Object]",
+  });
+  const txn = mp?.response?.transaction;
+  const upiIntent = txn?.qr_data?.data as string | undefined;
+  if (!upiIntent?.startsWith("upi:")) {
+    const status = String(txn?.status ?? mp?.response?.status ?? "unknown");
+    throw new BlinkitError(
+      `makePayment did not return a UPI intent (status=${status}): ${JSON.stringify(mp).slice(0, 240)}`,
+    );
+  }
+
+  await run.ready({ cart, upiIntent, orderId: prepared.orderId, trackId: txn?.track_id });
+  const deadline = Date.now() + (opts.timeoutSec ?? 600) * 1000;
+  while (Date.now() < deadline) {
+    const r = await zpost(bk, client, "verifyPaymentStatus", prepared.pasToken, commonForm(prepared, phone)).catch(
+      () => undefined,
+    );
+    const st = String(r?.response?.status ?? r?.status ?? "pending").toLowerCase();
+    if (st.includes("success") || st === "paid") return run.finish("paid");
+    if (st.includes("fail") || st.includes("cancel")) return run.finish("failed");
+    await new Promise((res) => setTimeout(res, 2500));
+  }
+  return run.finish("timeout");
+}

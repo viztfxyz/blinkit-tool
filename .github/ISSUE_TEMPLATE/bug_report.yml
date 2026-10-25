@@ -1,0 +1,53 @@
+name: Bug report
+description: Something doesn't work as documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! **Don't paste** your `session.json`, OTPs, access tokens, pay links or full address.
+        Security issues go to a [private advisory](https://github.com/viztfxyz/blinkit-tool/security/advisories/new) instead.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you ran, what you expected, and what you got instead.
+      placeholder: |
+        Ran `blinkit search paneer -p 560034` and expected results, got "error: …"
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Error output
+      description: The full error text (run with `--json` if it helps). Remove anything personal.
+      render: text
+  - type: dropdown
+    id: surface
+    attributes:
+      label: How were you using it?
+      options:
+        - CLI
+        - MCP server (Claude, Cursor, …)
+        - Library
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: blinkit-tool version
+      description: Output of `blinkit --version`
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: OS and Node.js version
+      placeholder: macOS 26, Node 24.3.0
+    validations:
+      required: true
+  - type: input
+    id: area
+    attributes:
+      label: City
+      description: Blinkit stores differ by area, so the city helps reproduce it. Not your address.

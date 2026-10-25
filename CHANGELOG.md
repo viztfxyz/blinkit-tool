@@ -1,0 +1,26 @@
+# Changelog
+
+All notable changes to this project are documented here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org).
+
+## [Unreleased]
+
+## [0.1.0] - 2026-10-25
+
+First public release.
+
+### Added
+
+- CLI (`blinkit`), TypeScript library and MCP server (`blinkit-mcp`) for Blinkit: pincode lookup, search, category
+  browse, product details, OTP login, saved addresses, server-priced cart and checkout.
+- Headless UPI payment through Zomato zpaykit, with a Chromium fallback.
+- Pay handoff as a [qrbaton](https://qrbaton.vercel.app) pay page (default) or a plain UPI QR image (`--handoff qr`).
+  In MCP, `blinkit_pay_status` attaches the QR image in `qr` mode.
+- `--out-of-stock` / `includeOutOfStock` to list sold-out products, which Blinkit's search hides.
+
+### Requirements
+
+- Node.js 22 or newer.
+
+[Unreleased]: https://github.com/viztfxyz/blinkit-tool/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/viztfxyz/blinkit-tool/releases/tag/v0.1.0

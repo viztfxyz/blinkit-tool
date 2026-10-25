@@ -1,0 +1,183 @@
+# blinkit-tool
+
+[![CI](https://github.com/viztfxyz/blinkit-tool/actions/workflows/ci.yml/badge.svg)](https://github.com/viztfxyz/blinkit-tool/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/blinkit-tool)](https://www.npmjs.com/package/blinkit-tool)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+Unofficial [Blinkit](https://blinkit.com) client: search, browse, cart, checkout and UPI pay, as a **CLI**, a
+**TypeScript library**, and an **MCP server** for Claude, Cursor and other agents.
+
+Payment is headless (Blinkit → Zomato zpaykit, no browser needed). The UPI QR is handed to whoever pays either as a
+[qrbaton](https://qrbaton.vercel.app) pay page (items, bill, delivery address, one-tap GPay / PhonePe / Paytm) or
+as a plain QR image.
+
+> [!WARNING]
+> Not affiliated with, endorsed by, or supported by Blinkit or Zomato. It talks to the same private
+> endpoints blinkit.com uses, which can change or break at any time, and automated use may be against
+> their terms. Use it for your own account, at your own risk. Real orders and real money are involved:
+> `pay` only proceeds when you pass the exact amount `checkout` showed.
+
+## Requirements
+
+- Node.js ≥ 22
+- A Chromium-based browser only for `pay --browser` (or if the headless API path fails)
+
+## Install
+
+```bash
+git clone https://github.com/viztfxyz/blinkit-tool.git
+cd blinkit-tool
+npm install
+npm run build
+npm link        # optional: puts `blinkit` and `blinkit-mcp` on your PATH
+```
+
+## CLI
+
+```bash
+blinkit location 560034                       # browse without login (indicative prices)
+blinkit search paneer --in-stock
+blinkit search "pears soap" --out-of-stock    # also list sold-out items
+blinkit browse "Bathing Soaps" --sort price
+blinkit product 211410
+
+blinkit login 98xxxxxxxx                      # SMS OTP
+blinkit address list
+blinkit address use home                      # label, id, or part of the address
+blinkit cart add 211410 -q 2
+blinkit checkout                              # payable bill for that address
+blinkit pay --confirm 642                     # the exact amount checkout showed
+```
+
+Every listing command takes `--json`. Run `blinkit <command> --help` for all options.
+
+### Sold-out products
+
+Blinkit's search never returns sold-out products, and category listings put them at the very end, so by default
+you mostly see what's in stock. Pass `--out-of-stock` (`-o`) to `search` or `browse` (MCP: `includeOutOfStock: true`)
+to also list sold-out items, tagged `[OUT OF STOCK]` / `inStock: false`, after the in-stock ones. For search this
+looks up the categories the top results belong to and pages their listings, so it takes a few extra seconds.
+`blinkit product <id>` works for sold-out products too.
+
+### Paying
+
+`blinkit pay --confirm <rupees>` places the order and waits for the UPI payment (10 minutes by default). How the
+QR reaches the payer is set with `--handoff`:
+
+| `--handoff`         | What you get                                                                                                                                                                                                         |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `qrbaton` (default) | A [qrbaton](https://qrbaton.vercel.app) link. The page shows the items, bill and delivery address; the payer taps Pay to open their UPI app, and the page updates when the payment completes. No account or API key. |
+| `qr`                | Just the UPI QR as a PNG (and the `upi://` link). Nothing leaves your machine except the payment itself.                                                                                                             |
+
+If qrbaton can't be reached, `pay` falls back to the plain QR and says so. The QR PNG is always saved to
+`~/.cache/blinkit-tool/upi_qr.png`.
+
+Other options: `--no-open` prints the link / QR path instead of opening it, `--agent <name>` shows who prepared the
+order on the pay page, `--browser` drives blinkit.com in Chromium instead of the API, `--dry-run` stops before a QR
+is generated.
+
+> qrbaton never handles money, but anyone with a pay link can see the order, including the delivery address.
+> Use `--handoff qr` if you don't want that.
+
+## MCP server (Claude, Cursor, Grok…)
+
+After `npm run build`, add the stdio server to your client:
+
+```json
+{
+  "mcpServers": {
+    "blinkit": {
+      "command": "node",
+      "args": ["/ABS/PATH/TO/blinkit-tool/dist/bin/blinkit-mcp.js"]
+    }
+  }
+}
+```
+
+- **Claude Desktop**: `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows)
+- **Claude Code**: `claude mcp add blinkit -- node /ABS/PATH/TO/blinkit-tool/dist/bin/blinkit-mcp.js` (this repo's `.mcp.json` also runs it from source)
+- **Cursor**: `.cursor/mcp.json`
+- **Grok CLI**: `grok mcp add blinkit -- node /ABS/PATH/TO/blinkit-tool/dist/bin/blinkit-mcp.js`
+
+The server runs on your machine, so cloud-only agents can't reach it.
+
+### Agent flow
+
+`blinkit_session` → (login: `blinkit_login_request_otp`, `blinkit_login_verify_otp`) → `blinkit_use_address` →
+`blinkit_search` / `blinkit_browse` → `blinkit_cart_set` → `blinkit_checkout` → **user confirms the amount** →
+`blinkit_pay` → poll `blinkit_pay_status` until `qr_ready` → send the user `payLink` (or, with `handoff: "qr"`, the QR
+image attached to the status result).
+
+The server's instructions tell agents never to request an OTP for a number the user didn't give, and never to call
+`blinkit_pay` without explicit confirmation of the exact amount.
+
+## Library
+
+```ts
+import { Blinkit, payWithUpi } from "blinkit-tool";
+
+const bk = new Blinkit(); // session at ~/.config/blinkit-tool/session.json, or pass a path
+await bk.setLocation({ pincode: "560034" });
+const milk = await bk.catalog.search("milk", { sort: "price", inStock: true, limit: 5 });
+await bk.cart.add(milk[0].productId, 2);
+console.log((await bk.cart.get()).bill.toPay);
+
+// Login: bk.account.requestOtp(phone), then bk.account.verifyOtp(code).
+// Pay:   await payWithUpi(bk, { confirmAmount: 642, handoff: "qr", openPage: false });
+```
+
+## Configuration
+
+| Variable          | Purpose                                                                           |
+| ----------------- | --------------------------------------------------------------------------------- |
+| `BLINKIT_SESSION` | Session file (default `~/.config/blinkit-tool/session.json`, owner-readable only) |
+| `BLINKIT_BROWSER` | Chromium-based browser for the browser pay path (auto-detected otherwise)         |
+| `QRBATON_URL`     | qrbaton host, if you run your own (default `https://qrbaton.vercel.app`)          |
+
+Caches (pincode lookups, category tree, last pay status, QR image) live in `~/.cache/blinkit-tool/`.
+
+## Troubleshooting
+
+- **"blinkit.com is refusing automated requests"**: Cloudflare is challenging the request. Wait a few minutes and retry.
+- **"session expired or not logged in"**: run `blinkit login <phone>` again.
+- **Search doesn't show something you expected**: it may be sold out; retry with `--out-of-stock`.
+- **`pay` says the amount differs**: the bill changed (stock, charges, promo). Run `blinkit checkout` and confirm the new amount.
+- **"createOrder returned no PAS token"**: the cart has a pending payment. Wait for it to expire (about 10 minutes) and retry.
+
+## Project layout
+
+```
+src/
+  bin/        CLI and MCP entry points
+  cli/        commander commands and terminal formatting
+  mcp/        MCP tool definitions
+  client.ts   Blinkit: the public client (session + catalog, cart, account)
+  core/       config, HTTP transport (Chrome TLS impersonation), session, storage, errors
+  services/   catalog, cart, account, and parsing of Blinkit's layout payloads
+  pay/        zpaykit API path, browser fallback, QR decoding, qrbaton / QR handoff
+  types.ts    shared types
+test/         vitest
+```
+
+## Development
+
+| Script                  | Purpose                       |
+| ----------------------- | ----------------------------- |
+| `npm run dev -- <args>` | CLI from source (tsx)         |
+| `npm run mcp`           | MCP server from source        |
+| `npm test`              | Vitest                        |
+| `npm run typecheck`     | Type-check `src/` and `test/` |
+| `npm run build`         | Compile to `dist/`            |
+| `npm run lint`          | Biome lint + format check     |
+| `npm run format`        | Apply Biome fixes/formatting  |
+| `npm run check`         | Lint, typecheck and tests     |
+
+## Contributing
+
+Issues and PRs welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). Please follow the [Code of Conduct](CODE_OF_CONDUCT.md),
+and report security problems privately as described in [SECURITY.md](SECURITY.md). Never paste your `session.json`,
+OTPs, or pay links into an issue.
+
+## License
+
+[MIT](LICENSE)
