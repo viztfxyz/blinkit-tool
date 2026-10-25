@@ -30,6 +30,7 @@
   },
   "bin": {
     "blinkit": "dist/bin/blinkit.js",
+    "blinkit-tool": "dist/bin/blinkit.js",
     "blinkit-mcp": "dist/bin/blinkit-mcp.js"
   },
   "main": "dist/index.js",

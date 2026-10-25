@@ -25,12 +25,17 @@ as a plain QR image.
 ## Install
 
 ```bash
-git clone https://github.com/viztfxyz/blinkit-tool.git
-cd blinkit-tool
-npm install
-npm run build
-npm link        # optional: puts `blinkit` and `blinkit-mcp` on your PATH
+npm install -g blinkit-tool       # gives you the `blinkit` command
+blinkit search milk -p 560034
 ```
+
+Or run it without installing:
+
+```bash
+npx blinkit-tool search milk -p 560034
+```
+
+As a library in your own project: `npm install blinkit-tool`. To hack on it, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## CLI
 
@@ -81,23 +86,25 @@ is generated.
 
 ## MCP server (Claude, Cursor, Grok…)
 
-After `npm run build`, add the stdio server to your client:
+Add the stdio server to your client. `npx` downloads and runs the latest version, nothing to install first:
 
 ```json
 {
   "mcpServers": {
     "blinkit": {
-      "command": "node",
-      "args": ["/ABS/PATH/TO/blinkit-tool/dist/bin/blinkit-mcp.js"]
+      "command": "npx",
+      "args": ["-y", "blinkit-tool", "mcp"]
     }
   }
 }
 ```
 
-- **Claude Desktop**: `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows)
-- **Claude Code**: `claude mcp add blinkit -- node /ABS/PATH/TO/blinkit-tool/dist/bin/blinkit-mcp.js` (this repo's `.mcp.json` also runs it from source)
-- **Cursor**: `.cursor/mcp.json`
-- **Grok CLI**: `grok mcp add blinkit -- node /ABS/PATH/TO/blinkit-tool/dist/bin/blinkit-mcp.js`
+- **Claude Desktop**: `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows), then restart Claude
+- **Claude Code**: `claude mcp add blinkit -- npx -y blinkit-tool mcp`
+- **Cursor**: `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global)
+- **Grok CLI**: `grok mcp add blinkit -- npx -y blinkit-tool mcp`
+
+Log in once from a terminal (`npx blinkit-tool login <phone>`), or let the agent do it with the OTP tools.
 
 The server runs on your machine, so cloud-only agents can't reach it.
 
