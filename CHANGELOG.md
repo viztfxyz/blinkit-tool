@@ -4,6 +4,14 @@ All notable changes to this project are documented here. Entries are generated b
 [release-please](https://github.com/googleapis/release-please) from commit messages, and the project uses
 [Semantic Versioning](https://semver.org).
 
+## [0.1.3](https://github.com/viztfxyz/blinkit-tool/compare/v0.1.2...v0.1.3) (2026-10-26)
+
+
+### Bug Fixes
+
+* **deps:** install cuimp from GitHub v2.1.2 to drop deprecated tar warning ([#11](https://github.com/viztfxyz/blinkit-tool/issues/11)) ([bfacbf4](https://github.com/viztfxyz/blinkit-tool/commit/bfacbf43a56d2fcc25c32f55ee2f5b645c68b396))
+* **deps:** use cuimp ^2.1.2 from npm instead of GitHub tag ([#13](https://github.com/viztfxyz/blinkit-tool/issues/13)) ([d095861](https://github.com/viztfxyz/blinkit-tool/commit/d095861d8f4d2dd2613729c8cf47ead70fe1f776))
+
 ## [0.1.2](https://github.com/viztfxyz/blinkit-tool/compare/v0.1.1...v0.1.2) (2026-10-25)
 
 
