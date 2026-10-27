@@ -1,8 +1,8 @@
-import { BlinkitError } from "../core/errors.js";
-import type { Core } from "../core/session.js";
-import type { Address, Cart, Json, SelectedAddress } from "../types.js";
+import { HandcartError } from "../../core/errors.js";
 import type { CartService } from "./cart.js";
 import { maskPhone, parseAddress } from "./parsing.js";
+import type { Core } from "./session.js";
+import type { BlinkitAddress, BlinkitCart, Json, SelectedAddress } from "./types.js";
 
 export interface NewAddress {
   label: string;
@@ -27,9 +27,9 @@ export class Account {
   /** Send a login OTP by SMS to a 10-digit Indian mobile number. */
   async requestOtp(phone: string): Promise<{ otpSent: true; message?: string }> {
     const digits = String(phone).replace(/\D/g, "").slice(-10);
-    if (!/^[6-9]\d{9}$/.test(digits)) throw new BlinkitError("phone must be a 10-digit Indian mobile number");
+    if (!/^[6-9]\d{9}$/.test(digits)) throw new HandcartError("phone must be a 10-digit Indian mobile number");
     const data = await this.core.req("POST", "/v2/accounts/", { form: { user_phone: digits } });
-    if (!data.success) throw new BlinkitError(data.message || "OTP request rejected");
+    if (!data.success) throw new HandcartError(data.message || "OTP request rejected");
     this.core.state.pendingPhone = digits;
     this.core.save();
     return { otpSent: true, message: data.message };
@@ -38,11 +38,11 @@ export class Account {
   /** Complete login with the code from the SMS. */
   async verifyOtp(code: string, phone?: string) {
     const userPhone = phone ?? this.core.state.pendingPhone;
-    if (!userPhone) throw new BlinkitError("request an OTP first (`blinkit login <phone>`)");
+    if (!userPhone) throw new HandcartError("request an OTP first (`handcart blinkit login <phone>`)");
     const data = await this.core.req("POST", "/v2/accounts/verify/phone/code/", {
       form: { user_phone: userPhone, verify_code: String(code).trim() },
     });
-    if (!data.verified || !data.access_token) throw new BlinkitError(data.message || "OTP rejected");
+    if (!data.verified || !data.access_token) throw new HandcartError(data.message || "OTP rejected");
     const user = data.user ?? {};
     Object.assign(this.core.state, { accessToken: data.access_token, user: { id: user.id, phone: user.phone } });
     delete this.core.state.pendingPhone;
@@ -75,7 +75,7 @@ export class Account {
 
   // ---------- addresses ----------
 
-  async addresses(): Promise<Address[]> {
+  async addresses(): Promise<BlinkitAddress[]> {
     const loc = this.core.currentLocation();
     const q = loc ? `?cur_lat=${loc.lat}&cur_lon=${loc.lon}` : "";
     const data = await this.core.req("GET", `/v4/address${q}`, { needLogin: true });
@@ -83,7 +83,7 @@ export class Account {
   }
 
   /** Deliver to a saved address (by id, label, or part of its text); reprices the cart for that store. */
-  async useAddress(which: string | number): Promise<{ address: SelectedAddress; cart?: Cart }> {
+  async useAddress(which: string | number): Promise<{ address: SelectedAddress; cart?: BlinkitCart }> {
     const addrs = await this.addresses();
     const w = String(which).trim().toLowerCase();
     const byId = addrs.filter((a) => String(a.id) === w);
@@ -91,23 +91,23 @@ export class Account {
     const byText = addrs.filter((a) => a.text.toLowerCase().includes(w));
     const matches = byId.length ? byId : byLabel.length ? byLabel : byText;
     if (!matches.length) {
-      throw new BlinkitError(`no saved address matches '${which}'; saved: ${addrs.map((a) => a.label).join(", ")}`);
+      throw new HandcartError(`no saved address matches '${which}'; saved: ${addrs.map((a) => a.label).join(", ")}`);
     }
     if (matches.length > 1) {
-      throw new BlinkitError(
+      throw new HandcartError(
         `ambiguous; use an id: ${matches.map((a) => `${a.id} (${a.label}: ${a.text.slice(0, 40)})`).join(", ")}`,
       );
     }
     const a = matches[0];
-    if (a.lat == null || a.lon == null) throw new BlinkitError(`address ${a.id} has no coordinates`);
+    if (a.lat == null || a.lon == null) throw new HandcartError(`address ${a.id} has no coordinates`);
     this.core.state.address = { id: a.id, label: a.label ?? "", text: a.text, lat: Number(a.lat), lon: Number(a.lon) };
     this.core.save();
-    const result: { address: SelectedAddress; cart?: Cart } = { address: this.core.state.address };
+    const result: { address: SelectedAddress; cart?: BlinkitCart } = { address: this.core.state.address };
     if (Object.keys(this.core.state.cart).length) result.cart = await this.cart.get();
     return result;
   }
 
-  async addAddress(a: NewAddress): Promise<Address> {
+  async addAddress(a: NewAddress): Promise<BlinkitAddress> {
     const loc = await this.core.resolveLocation(a);
     const body: Json = {
       label: a.label,

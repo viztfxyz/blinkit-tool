@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
-import type { Coords, Json, Location, SessionState } from "../types.js";
-import { APP_HEADERS, paths, REQUEST_KEY } from "./config.js";
-import { BlinkitError } from "./errors.js";
-import { type Method, Transport } from "./http.js";
-import { readJson, writeJson } from "./storage.js";
+import { HandcartError } from "../../core/errors.js";
+import { type Method, Transport } from "../../core/http.js";
+import { readJson, writeJson } from "../../core/storage.js";
+import { APP_HEADERS, BASE, IMPERSONATE_VERSIONS, paths, REQUEST_KEY, ZPAYKIT_PROBE } from "./config.js";
+import type { Coords, Json, Location, SessionState } from "./types.js";
 
 export interface ReqOptions {
   /** Location to price against; defaults to the session's address/area. */
@@ -18,7 +18,7 @@ export interface ReqOptions {
 
 /** Shared plumbing: the persisted session, the Blinkit auth key, JSON requests and location. */
 export class Core {
-  readonly http = new Transport();
+  readonly http = new Transport({ base: BASE, versions: IMPERSONATE_VERSIONS, probe: ZPAYKIT_PROBE });
   state: SessionState;
 
   constructor(readonly sessionFile: string = paths.session) {
@@ -42,7 +42,7 @@ export class Core {
     if (authKey && !refresh && Date.now() - authKeyTs < 12 * 86400_000) return authKey;
     const r = await this.raw("GET", "/v2/accounts/auth_key/", { auth: false, headers: { req_key: REQUEST_KEY } });
     const key = JSON.parse(r.text).auth_key;
-    if (!key) throw new BlinkitError("could not obtain auth key");
+    if (!key) throw new HandcartError("could not obtain auth key");
     this.state.authKey = key;
     this.state.authKeyTs = Date.now();
     this.save();
@@ -74,7 +74,8 @@ export class Core {
 
   /** JSON request with Blinkit error handling (expired auth key, logged-out session, API errors). */
   async req(method: Method, path: string, opts: ReqOptions = {}): Promise<Json> {
-    if (opts.needLogin && !this.loggedIn) throw new BlinkitError("not logged in; run `blinkit login <phone>` first");
+    if (opts.needLogin && !this.loggedIn)
+      throw new HandcartError("not logged in; run `handcart blinkit login <phone>` first");
     let r = await this.raw(method, path, opts);
     if (r.status === 403 && opts.auth !== false && r.text.trimStart().startsWith("{")) {
       await this.authKey(true);
@@ -84,7 +85,7 @@ export class Core {
     try {
       data = JSON.parse(r.text);
     } catch {
-      throw new BlinkitError(`HTTP ${r.status} from ${path} (non-JSON; possibly blocked by Cloudflare)`, {
+      throw new HandcartError(`HTTP ${r.status} from ${path} (non-JSON; possibly blocked by Cloudflare)`, {
         status: r.status,
         body: r.text,
         path,
@@ -95,14 +96,14 @@ export class Core {
         delete this.state.accessToken;
         this.save();
       }
-      throw new BlinkitError("session expired or not logged in; run `blinkit login <phone>`", {
+      throw new HandcartError("session expired or not logged in; run `handcart blinkit login <phone>`", {
         status: r.status,
         body: r.text,
         path,
       });
     }
     if (r.status >= 400) {
-      throw new BlinkitError(data?.error || data?.message || `HTTP ${r.status}`, {
+      throw new HandcartError(data?.error || data?.message || `HTTP ${r.status}`, {
         status: r.status,
         body: r.text,
         path,
@@ -116,15 +117,15 @@ export class Core {
   /** Resolve a 6-digit pincode to the coordinates Blinkit uses (cached on disk). */
   async locate(pincode: string): Promise<Location> {
     pincode = String(pincode).trim();
-    if (!/^\d{6}$/.test(pincode)) throw new BlinkitError("pincode must be 6 digits");
+    if (!/^\d{6}$/.test(pincode)) throw new HandcartError("pincode must be 6 digits");
     const cache = readJson<Record<string, Location>>(paths.locations) ?? {};
     if (cache[pincode]) return cache[pincode];
     const preds: Json[] =
       (await this.req("GET", `/mapAPI/autosuggest_google?query=${pincode}`, { auth: false })).predictions ?? [];
-    if (!preds.length) throw new BlinkitError(`no location found for pincode ${pincode}; pass lat/lon instead`);
+    if (!preds.length) throw new HandcartError(`no location found for pincode ${pincode}; pass lat/lon instead`);
     const pred = preds.find((p) => p.types?.includes("postal_code")) ?? preds[0];
     const info = await this.req("GET", `/location/info?place_id=${pred.place_id}`, { auth: false });
-    if (info.coordinate?.lat == null) throw new BlinkitError(`could not resolve coordinates for ${pincode}`);
+    if (info.coordinate?.lat == null) throw new HandcartError(`could not resolve coordinates for ${pincode}`);
     const loc: Location = {
       pincode,
       lat: info.coordinate.lat,
@@ -144,7 +145,7 @@ export class Core {
     if (where.pincode) return this.locate(where.pincode);
     const loc = this.currentLocation();
     if (!loc)
-      throw new BlinkitError("no location: pass a pincode or lat/lon, or set one with `location` / `address use`");
+      throw new HandcartError("no location: pass a pincode or lat/lon, or set one with `location` / `address use`");
     return loc;
   }
 

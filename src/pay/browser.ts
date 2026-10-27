@@ -4,58 +4,14 @@
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, dirname, join } from "node:path";
-import type { Blinkit } from "../client.js";
-import { BASE, paths } from "../core/config.js";
-import { BlinkitError } from "../core/errors.js";
+import { dirname, join } from "node:path";
+import { requireBrowser } from "../core/browser.js";
+import { HandcartError } from "../core/errors.js";
+import type { Blinkit } from "../platforms/blinkit/client.js";
+import { BASE, paths } from "../platforms/blinkit/config.js";
 import { confirmedCheckout, type PayOptions, PayRun } from "./flow.js";
 import { type FrameQrCapture, upiIntentFromCapture } from "./qr.js";
 import type { PayStatus } from "./status.js";
-
-/** Skip Homebrew-style wrappers whose `exec` target is missing (e.g. chromium → Chromium.app). */
-function isRunnableBrowser(bin: string): boolean {
-  if (!existsSync(bin)) return false;
-  try {
-    const head = readFileSync(bin, "utf8").slice(0, 400);
-    if (!head.startsWith("#!")) return true;
-    const m = head.match(/\bexec\s+(?:'([^']+)'|"([^"]+)"|(\S+))/);
-    const target = m?.[1] ?? m?.[2] ?? m?.[3];
-    return !target || existsSync(target);
-  } catch {
-    return true; // binary, not a script
-  }
-}
-
-function findBrowser(): string | undefined {
-  if (process.env.BLINKIT_BROWSER) return process.env.BLINKIT_BROWSER;
-  const mac = ["Google Chrome", "Chromium", "Brave Browser", "Microsoft Edge", "Arc"].map(
-    (app) => `/Applications/${app}.app/Contents/MacOS/${app}`,
-  );
-  const win = [process.env.PROGRAMFILES, process.env["PROGRAMFILES(X86)"], process.env.LOCALAPPDATA]
-    .filter((dir): dir is string => !!dir)
-    .flatMap((dir) => [
-      join(dir, "Google/Chrome/Application/chrome.exe"),
-      join(dir, "Microsoft/Edge/Application/msedge.exe"),
-    ]);
-  const fixed = [...mac, ...win].find(isRunnableBrowser);
-  if (fixed) return fixed;
-  const names = [
-    "google-chrome-stable",
-    "google-chrome",
-    "chromium",
-    "chromium-browser",
-    "brave-browser",
-    "brave",
-    "microsoft-edge",
-  ];
-  for (const dir of (process.env.PATH ?? "").split(delimiter)) {
-    for (const n of names) {
-      const p = join(dir, n);
-      if (isRunnableBrowser(p)) return p;
-    }
-  }
-  return undefined;
-}
 
 /** On Linux, run Chromium on X11 (XWayland on Wayland desktops): Playwright + Wayland can hang. */
 function displayEnv(): { env: Record<string, string>; args: string[] } {
@@ -143,9 +99,8 @@ export async function payViaBrowser(bk: Blinkit, opts: PayOptions, apiError?: st
   const { state } = bk;
   const a = state.address;
   const accessToken = state.accessToken;
-  if (!a || !accessToken) throw new BlinkitError("pay needs login and a saved address");
-  const executablePath = findBrowser();
-  if (!executablePath) throw new BlinkitError("no Chromium-based browser found; install one or set BLINKIT_BROWSER");
+  if (!a || !accessToken) throw new HandcartError("pay needs login and a saved address");
+  const executablePath = await requireBrowser();
   const { chromium } = await import("playwright-core");
   const run = new PayRun(bk, opts, toPay, apiError);
   const { log } = run;
@@ -228,7 +183,7 @@ export async function payViaBrowser(bk: Blinkit, opts: PayOptions, apiError?: st
     const m = body.match(/Grand total\s*₹\s*([\d,]+)/);
     const siteTotal = m ? Number(m[1].replace(/,/g, "")) : undefined;
     if (siteTotal !== Math.round(toPay)) {
-      throw new BlinkitError(`blinkit.com shows ₹${siteTotal ?? "?"} but you confirmed ₹${toPay}; aborting`);
+      throw new HandcartError(`blinkit.com shows ₹${siteTotal ?? "?"} but you confirmed ₹${toPay}; aborting`);
     }
     await proceed.last().click();
 
@@ -240,7 +195,7 @@ export async function payViaBrowser(bk: Blinkit, opts: PayOptions, apiError?: st
       if (frame && (await frame.getByText("UPI", { exact: true }).count())) break;
       await page.waitForTimeout(500);
     }
-    if (!frame) throw new BlinkitError("payment widget did not load");
+    if (!frame) throw new HandcartError("payment widget did not load");
     await frame.getByText("UPI", { exact: true }).first().click();
 
     if (opts.dryRun) {
@@ -262,7 +217,7 @@ export async function payViaBrowser(bk: Blinkit, opts: PayOptions, apiError?: st
     const capture = await frame.evaluate(probeZpaykitQr).catch(() => null);
     const shot = existsSync(paths.qrRaw) ? readFileSync(paths.qrRaw) : undefined;
     const upiIntent = upiIntentFromCapture(capture, shot);
-    if (!upiIntent && !shot) throw new BlinkitError("could not capture the payment QR");
+    if (!upiIntent && !shot) throw new HandcartError("could not capture the payment QR");
     // Without a decoded intent, qrbaton reads the captured image itself.
     await run.ready({ cart, upiIntent, qrPng: upiIntent ? undefined : shot });
 
@@ -282,7 +237,7 @@ export async function payViaBrowser(bk: Blinkit, opts: PayOptions, apiError?: st
     const msg = (e instanceof Error ? e.message : String(e)).split("\n")[0];
     await page.screenshot({ path: paths.payErrorShot }).catch(() => undefined);
     await run.finish("error", { error: msg, screenshot: paths.payErrorShot });
-    throw new BlinkitError(`${msg} (screenshot: ${paths.payErrorShot})`);
+    throw new HandcartError(`${msg} (screenshot: ${paths.payErrorShot})`);
   } finally {
     await page.waitForTimeout(2000).catch(() => undefined);
     await browser.close();

@@ -90,15 +90,23 @@ omit that command for it and say so when a fan-out skips it.
 
 ```ts
 export interface PlatformDescriptor {
-  name: string;                       // "blinkit" | "zepto"
-  label: string;                      // "Blinkit"
-  create(): Platform;                 // lazy; never constructed until used
-  capabilities: Capability[];         // declared, checked at registration
+  name: string; // "blinkit" | "zepto"
+  label: string; // "Blinkit"
+  create(): Platform; // lazy; never constructed until used
+  capabilities: Capability[]; // declared, checked at registration
 }
 export type Capability =
-  | "search" | "product" | "cart" | "checkout" | "pay" | "orders"
-  | "addresses" | "login"
-  | "categories" | "browse" | "locate";   // Blinkit-only today
+  | "search"
+  | "product"
+  | "cart"
+  | "checkout"
+  | "pay"
+  | "orders"
+  | "addresses"
+  | "login"
+  | "categories"
+  | "browse"
+  | "locate"; // Blinkit-only today
 
 export interface Platform {
   requestOtp(phone: string): Promise<{ sent: true; to: string }>;
@@ -134,13 +142,13 @@ descriptor wraps it.
 
 Fan-out is the default; naming a platform narrows to it.
 
-| bare (all platforms) | narrowed |
-| --- | --- |
+| bare (all platforms)                    | narrowed                    |
+| --------------------------------------- | --------------------------- |
 | `handcart search <q>` merged comparison | `handcart zepto search <q>` |
-| `handcart cart` every open cart | `handcart zepto cart` |
-| `handcart orders` merged, newest first | `handcart zepto orders` |
-| `handcart whoami` one line per platform | `handcart zepto whoami` |
-| `handcart doctor` all checks | `handcart zepto doctor` |
+| `handcart cart` every open cart         | `handcart zepto cart`       |
+| `handcart orders` merged, newest first  | `handcart zepto orders`     |
+| `handcart whoami` one line per platform | `handcart zepto whoami`     |
+| `handcart doctor` all checks            | `handcart zepto doctor`     |
 
 Platform required (writes, or needs a platform-specific id):
 
@@ -214,15 +222,15 @@ Four stages:
 
 Measured and rejected, with numbers, so nobody re-litigates them:
 
-| idea | result |
-| --- | --- |
-| name similarity alone (jaccard/dice/overlap/idf/trigram/levenshtein) | 70.9-81.3% F1 |
-| MRP equality alone | 84.4% F1 |
-| variant markers derived from data instead of a word list | 95.8% F1 (worse) |
-| pack-count gate | 96.4% F1 (worse) |
-| combo-wording gate | 95.9% F1 (worse) |
-| local ONNX sentence embeddings | unnecessary; rules reach 97% with no dependency |
-| LLM adjudication | unnecessary, and wrong for an offline CLI |
+| idea                                                                 | result                                          |
+| -------------------------------------------------------------------- | ----------------------------------------------- |
+| name similarity alone (jaccard/dice/overlap/idf/trigram/levenshtein) | 70.9-81.3% F1                                   |
+| MRP equality alone                                                   | 84.4% F1                                        |
+| variant markers derived from data instead of a word list             | 95.8% F1 (worse)                                |
+| pack-count gate                                                      | 96.4% F1 (worse)                                |
+| combo-wording gate                                                   | 95.9% F1 (worse)                                |
+| local ONNX sentence embeddings                                       | unnecessary; rules reach 97% with no dependency |
+| LLM adjudication                                                     | unnecessary, and wrong for an offline CLI       |
 
 Known errors are documented in `test/fixtures/match/candidates.txt`. Three of the eight are
 Tata Tea rows where the hand label itself is arguable.

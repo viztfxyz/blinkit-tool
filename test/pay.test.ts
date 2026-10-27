@@ -3,9 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import QRCode from "qrcode";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Blinkit } from "../src/client.js";
-import { paths } from "../src/core/config.js";
-import { BlinkitError } from "../src/core/errors.js";
+import { HandcartError } from "../src/core/errors.js";
 import { handOff, payPageTtlSec, qrbatonOrder, qrbatonStatusFor } from "../src/pay/handoff.js";
 import { decodeQrPng, extractUpiIntent, upiIntentFromCapture } from "../src/pay/qr.js";
 import {
@@ -16,7 +14,9 @@ import {
   qrExpiresAt,
   verifyForm,
 } from "../src/pay/zpaykit.js";
-import type { Cart } from "../src/types.js";
+import { Blinkit } from "../src/platforms/blinkit/client.js";
+import { paths } from "../src/platforms/blinkit/config.js";
+import type { BlinkitCart } from "../src/platforms/blinkit/types.js";
 
 const qrOpts = { type: "png" as const, width: 280, margin: 2, errorCorrectionLevel: "M" as const };
 
@@ -83,10 +83,10 @@ describe("prepareOrder HTTP errors", () => {
     const body = `{"reason":"${"x".repeat(400)}"}`;
     bk.raw = async () => ({ status: 500, text: body });
     const err = await prepareOrder(bk, "99").catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(BlinkitError);
+    expect(err).toBeInstanceOf(HandcartError);
     const prefix = "GET /createOrder/99 failed (HTTP 500): ";
-    expect((err as BlinkitError).message.startsWith(prefix)).toBe(true);
-    expect((err as BlinkitError).message.slice(prefix.length)).toBe(body.slice(0, 200));
+    expect((err as HandcartError).message.startsWith(prefix)).toBe(true);
+    expect((err as HandcartError).message.slice(prefix.length)).toBe(body.slice(0, 200));
   });
 
   it("names POST /zomato_payment_hash when that call fails", async () => {
@@ -144,7 +144,7 @@ describe("prepareOrder HTTP errors", () => {
 
 describe("handoff", () => {
   const intent = "upi://pay?pa=a@upi&am=99&cu=INR";
-  const cart: Cart = {
+  const cart: BlinkitCart = {
     cartId: 1,
     pricing: "payable",
     items: [
@@ -285,7 +285,7 @@ describe("payWithUpi fallback", () => {
     const { payWithUpi } = await import("../src/pay/index.js");
     const bk = client();
     bk.state.address = { id: 1, label: "Home", text: "x", lat: 1, lon: 1 };
-    bk.cart.checkout = async () => ({ bill: { toPay: 120 } }) as Cart;
+    bk.cart.checkout = async () => ({ bill: { toPay: 120 } }) as BlinkitCart;
     const logs: string[] = [];
     await expect(payWithUpi(bk, { confirmAmount: 100, log: (m) => logs.push(m) })).rejects.toThrow(
       /amount to pay is ₹120/,

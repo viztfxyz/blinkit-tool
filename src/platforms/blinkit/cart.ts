@@ -1,7 +1,7 @@
-import { BlinkitError } from "../core/errors.js";
-import type { Core } from "../core/session.js";
-import type { Cart, Json, LineOutcome, Pricing } from "../types.js";
+import { HandcartError } from "../../core/errors.js";
 import { parseCart } from "./parsing.js";
+import type { Core } from "./session.js";
+import type { BlinkitCart, Json, LineOutcome, Pricing } from "./types.js";
 
 /**
  * The cart lives on Blinkit's server (priced per store). We keep productId → quantity locally,
@@ -14,11 +14,11 @@ export class CartService {
     return this.core.loggedIn && this.core.state.address ? "payable" : "indicative";
   }
 
-  private async sync(): Promise<Cart> {
+  private async sync(): Promise<BlinkitCart> {
     const { state } = this.core;
     if (!this.core.currentLocation()) {
-      throw new BlinkitError(
-        "set a delivery location first (`blinkit location <pincode>` or `blinkit address use <label>`)",
+      throw new HandcartError(
+        "set a delivery location first (`handcart blinkit location <pincode>` or `handcart blinkit address use <label>`)",
       );
     }
     const body: Json = {
@@ -41,16 +41,16 @@ export class CartService {
   }
 
   /** Price the current cart with the server. */
-  get(): Promise<Cart> {
+  get(): Promise<BlinkitCart> {
     return this.sync();
   }
 
   /** Set absolute quantities ({productId: qty}); 0 removes. Reports a per-line outcome. */
-  async set(lines: Record<string | number, number>): Promise<Cart> {
+  async set(lines: Record<string | number, number>): Promise<BlinkitCart> {
     const wanted = Object.entries(lines).map(([k, v]) => {
       const id = Number(k);
-      if (!Number.isInteger(id) || id <= 0) throw new BlinkitError(`'${k}' is not a product id`);
-      if (!Number.isFinite(v)) throw new BlinkitError(`quantity for ${k} must be a number`);
+      if (!Number.isInteger(id) || id <= 0) throw new HandcartError(`'${k}' is not a product id`);
+      if (!Number.isFinite(v)) throw new HandcartError(`quantity for ${k} must be a number`);
       return [String(id), Math.max(0, Math.trunc(v))] as const;
     });
     for (const [pid, q] of wanted) {
@@ -71,15 +71,15 @@ export class CartService {
   }
 
   /** Add on top of the current quantity. */
-  add(productId: number, quantity = 1): Promise<Cart> {
+  add(productId: number, quantity = 1): Promise<BlinkitCart> {
     return this.set({ [productId]: (this.core.state.cart[String(productId)] ?? 0) + quantity });
   }
 
-  remove(productId: number): Promise<Cart> {
+  remove(productId: number): Promise<BlinkitCart> {
     return this.set({ [productId]: 0 });
   }
 
-  clear(): Promise<Cart> {
+  clear(): Promise<BlinkitCart> {
     this.core.state.cart = {};
     return this.sync();
   }
@@ -88,18 +88,18 @@ export class CartService {
    * Validate the cart for the selected saved address and return the payable bill.
    * Does not place an order; `payWithUpi` does that via Zomato zpaykit (UPI QR).
    */
-  async checkout(): Promise<Cart> {
+  async checkout(): Promise<BlinkitCart> {
     const { state } = this.core;
-    if (!this.core.loggedIn) throw new BlinkitError("checkout needs login (`blinkit login <phone>`)");
+    if (!this.core.loggedIn) throw new HandcartError("checkout needs login (`handcart blinkit login <phone>`)");
     if (!state.address) {
-      throw new BlinkitError(
-        "choose a saved delivery address first (`blinkit address list`, then `blinkit address use`)",
+      throw new HandcartError(
+        "choose a saved delivery address first (`handcart blinkit address list`, then `handcart blinkit address use`)",
       );
     }
     const cart = await this.sync();
-    if (!cart.items.length) throw new BlinkitError("cart is empty");
+    if (!cart.items.length) throw new HandcartError("cart is empty");
     const cid = state.cartId;
-    if (!cid) throw new BlinkitError("server did not assign a cart id; try `blinkit cart` again");
+    if (!cid) throw new HandcartError("server did not assign a cart id; try `handcart blinkit cart` again");
     const data = await this.core.req("POST", `/v5/carts/${cid}/validate`, {
       json: {
         channel_address_id: state.address.id,
@@ -111,7 +111,7 @@ export class CartService {
     out.checkout = {
       cartId: cid,
       state: data.cart_state ?? null,
-      nextStep: `To pay by UPI: \`blinkit pay --confirm ${out.bill.toPay}\``,
+      nextStep: `To pay by UPI: \`handcart blinkit pay --confirm ${out.bill.toPay}\``,
     };
     return out;
   }

@@ -1,8 +1,8 @@
 {
   "mcpServers": {
-    "blinkit": {
+    "handcart": {
       "command": "npx",
-      "args": ["-y", "tsx", "src/bin/blinkit-mcp.ts"],
+      "args": ["-y", "tsx", "src/bin/handcart-mcp.ts"],
       "cwd": "${workspaceFolder}"
     }
   }
