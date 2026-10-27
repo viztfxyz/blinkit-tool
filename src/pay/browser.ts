@@ -4,74 +4,14 @@
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, dirname, join } from "node:path";
+import { dirname, join } from "node:path";
 import type { Blinkit } from "../client.js";
+import { ensureBrowser } from "../core/browser.js";
 import { BASE, paths } from "../core/config.js";
 import { BlinkitError } from "../core/errors.js";
 import { confirmedCheckout, type PayOptions, PayRun } from "./flow.js";
 import { type FrameQrCapture, upiIntentFromCapture } from "./qr.js";
 import type { PayStatus } from "./status.js";
-
-/** Skip Homebrew-style wrappers whose `exec` target is missing (e.g. chromium → Chromium.app). */
-function isRunnableBrowser(bin: string): boolean {
-  if (!existsSync(bin)) return false;
-  try {
-    const head = readFileSync(bin, "utf8").slice(0, 400);
-    if (!head.startsWith("#!")) return true;
-    const m = head.match(/\bexec\s+(?:'([^']+)'|"([^"]+)"|(\S+))/);
-    const target = m?.[1] ?? m?.[2] ?? m?.[3];
-    return !target || existsSync(target);
-  } catch {
-    return true; // binary, not a script
-  }
-}
-
-/** Chromium that `npx playwright install chromium` downloaded: often the only browser on a headless box. */
-function playwrightChromium(): string | undefined {
-  const root = process.env.PLAYWRIGHT_BROWSERS_PATH || join(homedir(), ".cache", "ms-playwright");
-  if (!existsSync(root)) return undefined;
-  const builds = readdirSync(root)
-    .filter((d) => /^chromium-\d+$/.test(d))
-    .sort((a, b) => Number(b.split("-")[1]) - Number(a.split("-")[1]));
-  for (const build of builds) {
-    for (const bin of ["chrome-linux64/chrome", "chrome-linux/chrome", "chrome-win/chrome.exe"]) {
-      const p = join(root, build, bin);
-      if (existsSync(p)) return p;
-    }
-  }
-  return undefined;
-}
-
-export function findBrowser(): string | undefined {
-  if (process.env.BLINKIT_BROWSER) return process.env.BLINKIT_BROWSER;
-  const mac = ["Google Chrome", "Chromium", "Brave Browser", "Microsoft Edge", "Arc"].map(
-    (app) => `/Applications/${app}.app/Contents/MacOS/${app}`,
-  );
-  const win = [process.env.PROGRAMFILES, process.env["PROGRAMFILES(X86)"], process.env.LOCALAPPDATA]
-    .filter((dir): dir is string => !!dir)
-    .flatMap((dir) => [
-      join(dir, "Google/Chrome/Application/chrome.exe"),
-      join(dir, "Microsoft/Edge/Application/msedge.exe"),
-    ]);
-  const fixed = [...mac, ...win].find(isRunnableBrowser);
-  if (fixed) return fixed;
-  const names = [
-    "google-chrome-stable",
-    "google-chrome",
-    "chromium",
-    "chromium-browser",
-    "brave-browser",
-    "brave",
-    "microsoft-edge",
-  ];
-  for (const dir of (process.env.PATH ?? "").split(delimiter)) {
-    for (const n of names) {
-      const p = join(dir, n);
-      if (isRunnableBrowser(p)) return p;
-    }
-  }
-  return playwrightChromium();
-}
 
 /** On Linux, run Chromium on X11 (XWayland on Wayland desktops): Playwright + Wayland can hang. */
 function displayEnv(): { env: Record<string, string>; args: string[] } {
@@ -160,8 +100,7 @@ export async function payViaBrowser(bk: Blinkit, opts: PayOptions, apiError?: st
   const a = state.address;
   const accessToken = state.accessToken;
   if (!a || !accessToken) throw new BlinkitError("pay needs login and a saved address");
-  const executablePath = findBrowser();
-  if (!executablePath) throw new BlinkitError("no Chromium-based browser found; install one or set BLINKIT_BROWSER");
+  const executablePath = await ensureBrowser({ headed: true });
   const { chromium } = await import("playwright-core");
   const run = new PayRun(bk, opts, toPay, apiError);
   const { log } = run;
@@ -295,10 +234,12 @@ export async function payViaBrowser(bk: Blinkit, opts: PayOptions, apiError?: st
     }
     return run.finish("timeout");
   } catch (e) {
-    const msg = (e instanceof Error ? e.message : String(e)).split("\n")[0];
+    const msg = e instanceof BlinkitError ? e.reason : (e instanceof Error ? e.message : String(e)).split("\n")[0];
     await page.screenshot({ path: paths.payErrorShot }).catch(() => undefined);
     await run.finish("error", { error: msg, screenshot: paths.payErrorShot });
-    throw new BlinkitError(`${msg} (screenshot: ${paths.payErrorShot})`);
+    throw new BlinkitError(`${msg} (screenshot: ${paths.payErrorShot})`, {
+      fix: e instanceof BlinkitError ? e.fix : undefined,
+    });
   } finally {
     await page.waitForTimeout(2000).catch(() => undefined);
     await browser.close();

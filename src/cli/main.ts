@@ -1,12 +1,16 @@
 import { createInterface } from "node:readline/promises";
 import { Command, InvalidArgumentError, Option } from "commander";
 import { Blinkit } from "../client.js";
+import { allowBrowserDownload } from "../core/browser.js";
 import { SORTS, type Sort, VERSION } from "../core/config.js";
 import { BlinkitError } from "../core/errors.js";
+import { allOk, formatChecks, runDoctor } from "../doctor.js";
 import { HANDOFFS, type Handoff, payWithUpi } from "../pay/index.js";
 import type { SearchOptions } from "../services/catalog.js";
-import { registerAmazon } from "./amazon.js";
+import { now, registerAmazon } from "./amazon.js";
 import * as fmt from "./format.js";
+import { closePrompts, confirm } from "./prompt.js";
+import { registerSetup } from "./setup.js";
 
 const int = (v: string) => {
   const n = Number.parseInt(v, 10);
@@ -239,6 +243,20 @@ program
 
 registerAmazon(program);
 
+// ---------- setup ----------
+
+registerSetup(program, bk, now);
+
+program
+  .command("doctor")
+  .description("check Node, build, browser, logins and address; prints the fix for anything that's wrong")
+  .option("--json", "print JSON")
+  .action(async (o) => {
+    const checks = await runDoctor({ bk: bk(), now: now() });
+    o.json ? fmt.json(checks) : console.log(formatChecks(checks));
+    if (!allOk(checks)) process.exitCode = 1;
+  });
+
 program
   .command("mcp")
   .description("run as an MCP stdio server")
@@ -248,11 +266,15 @@ program
   });
 
 export async function run(argv = process.argv): Promise<void> {
+  // Only someone at a terminal can say yes to a download; agents get the command in the error instead.
+  if (process.stdin.isTTY) allowBrowserDownload(confirm);
   try {
     await program.parseAsync(argv);
   } catch (e) {
     if (!(e instanceof BlinkitError)) throw e;
     console.error(`error: ${e.message}`);
     process.exitCode = 1;
+  } finally {
+    closePrompts();
   }
 }

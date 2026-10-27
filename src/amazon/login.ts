@@ -27,9 +27,19 @@ export function otpSentVia(text: string): OtpChannel | "unknown" {
   return "unknown";
 }
 
+const NOT_SENT = /couldn.?t send an OTP|unable to send|try again later/i;
+
+/** Amazon's "We couldn't send an OTP", as an error that says what to do. */
+export function otpNotSent(channel: OtpChannel): BlinkitError {
+  const other = channel === "whatsapp" ? "sms" : "whatsapp";
+  return new BlinkitError(`Amazon couldn't send the OTP; wait a few minutes or use --via ${other}`, {
+    fix: `wait a few minutes, then run \`blinkit amazon login <phone> --via ${other}\``,
+  });
+}
+
 /** Whether the OTP screen says the code was sent, and where. */
 export function otpOutcome(text: string): { otpSent: boolean; channel: OtpChannel | "unknown" } {
-  return { otpSent: !/couldn.?t send an OTP|unable to send|try again later/i.test(text), channel: otpSentVia(text) };
+  return { otpSent: !NOT_SENT.test(text), channel: otpSentVia(text) };
 }
 
 const OTP_INPUT = "#ap_otp_code, input[name=otpCode], #cvf-input-code, input[name=code]";
@@ -83,12 +93,9 @@ export class NowLogin {
       await clickAndSettle(page, page.locator("input#continue, input[type=submit]").first());
       await this.reachOtp(page, channel);
       const r = otpOutcome(await pageText(page));
-      if (!r.otpSent) {
-        await b.discard();
-        return { ...r, error: "Amazon couldn't send the OTP", to: maskPhone(digits) };
-      }
+      if (!r.otpSent) throw otpNotSent(channel);
       this.pending = { b, phone: digits };
-      return { ...r, to: maskPhone(digits) };
+      return { otpSent: true as const, channel: r.channel, to: maskPhone(digits) };
     } catch (e) {
       await b.discard();
       throw e;
@@ -147,6 +154,7 @@ export class NowLogin {
         .locator("#auth-error-message-box, .a-alert-error, .a-alert-inline-error")
         .filter({ visible: true });
       const error = (await errors.allInnerTexts().catch(() => [])).join(" ").replace(/\s+/g, " ").trim();
+      if (NOT_SENT.test(error)) throw otpNotSent(channel);
       if (error && !/passkey/i.test(error)) throw new BlinkitError(`Amazon: ${error}`);
       if (await visible(page, "#ap_password")) {
         throw new BlinkitError("Amazon only offered password sign-in for this account; OTP login isn't available");
