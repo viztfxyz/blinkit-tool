@@ -408,6 +408,10 @@ describe("Amazon OTP channel", () => {
     expect(otpSentVia("Enter the WhatsApp code we sent. Verify with WhatsApp")).toBe("whatsapp");
     expect(otpSentVia("We've sent a One Time Password (OTP) to the mobile number")).toBe("sms");
     expect(otpSentVia("Enter the SMS code sent to +91 ******1234")).toBe("sms");
+    expect(otpSentVia("We've sent an OTP to +91 ******0055 Enter OTP Resend OTP Get OTP on WhatsApp instead")).toBe(
+      "sms",
+    );
+    expect(otpSentVia("We sent a code to your phone via SMS. Send code via WhatsApp")).toBe("sms");
     expect(otpSentVia("Enter the code")).toBe("unknown");
   });
 });

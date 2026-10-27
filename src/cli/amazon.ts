@@ -101,7 +101,7 @@ export function registerAmazon(program: Command): void {
     .action(async (phone, o) => {
       const r = await now().requestOtp(phone, o.via as OtpChannel);
       const via = { whatsapp: " by WhatsApp", sms: " by SMS", unknown: "" }[r.channel];
-      console.log(`OTP sent${via} to ${r.to}.${r.note ? ` ${r.note}.` : ""}`);
+      console.log(`OTP sent${via} to ${r.to}.${r.note ? ` ${r.note}` : ""}`);
       const rl = createInterface({ input: process.stdin, output: process.stdout });
       try {
         for (;;) {

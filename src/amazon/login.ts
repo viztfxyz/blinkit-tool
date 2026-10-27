@@ -15,8 +15,13 @@ export const OTP_CHANNELS = ["sms", "whatsapp"] as const satisfies readonly OtpC
 
 /** Where the OTP screen says the code went; "unknown" when it doesn't say. */
 export function otpSentVia(text: string): OtpChannel | "unknown" {
+  // Drop "get OTP on WhatsApp instead"-style offers so only the "we've sent…" sentence decides.
+  text = text.replace(
+    /(get|send|receive|resend)\s+(an?\s+)?(otp|code)\s+(on|via|by|through)\s+(whatsapp|sms|text message)(\s+instead)?/gi,
+    " ",
+  );
   if (/sent.{0,60}WhatsApp|WhatsApp.{0,40}(code|OTP)|Verify with WhatsApp/i.test(text)) return "whatsapp";
-  if (/sent.{0,60}(SMS|text message|mobile number)|\bSMS\b.{0,40}(code|OTP)/i.test(text)) return "sms";
+  if (/sent.{0,60}(SMS|text message|mobile number|phone|\+\d)|\bSMS\b.{0,40}(code|OTP)/i.test(text)) return "sms";
   return "unknown";
 }
 
@@ -74,7 +79,7 @@ export class NowLogin {
       const sentVia = otpSentVia(await pageText(page));
       const note =
         channel === "sms" && sentVia === "whatsapp"
-          ? "Amazon sent the code to WhatsApp; no SMS option was offered"
+          ? "Amazon sent the code to WhatsApp; switching to SMS didn't take effect or wasn't offered."
           : undefined;
       return { otpSent: true as const, channel: sentVia, to: maskPhone(digits), ...(note ? { note } : {}) };
     } catch (e) {
@@ -92,7 +97,7 @@ export class NowLogin {
         const sentVia = otpSentVia(text);
         const wrong = channel === "sms" ? /WhatsApp/i.test(text) && sentVia !== "sms" : sentVia !== "whatsapp";
         const other = page
-          .locator("a, button, input[type=submit], span[role=button]")
+          .locator("a, button, span[role=button]")
           .filter({ hasText: channel === "sms" ? /\b(SMS|text message)\b/i : /\bWhatsApp\b/i })
           .filter({ visible: true });
         if (!switched && wrong && (await other.count())) {
