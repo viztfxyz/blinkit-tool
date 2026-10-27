@@ -1,14 +1,9 @@
 /**
- * `blinkit doctor`: is this machine ready? One line per check, ✓ or ✗ with the command that fixes it.
- * Also the MCP tool `doctor`, which agents call first.
+ * `blinkit doctor` and the MCP tool `doctor`: one ✓/✗ line per check, with the command that fixes a ✗.
  */
-import { existsSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import type { AmazonNow } from "./amazon/client.js";
 import type { Blinkit } from "./client.js";
-import { type FoundBrowser, INSTALL_BROWSER, locateBrowser } from "./core/browser.js";
-import { BlinkitError } from "./core/errors.js";
-import { AMAZON_RELOGIN } from "./core/fixes.js";
+import { findBrowser, INSTALL_BROWSER } from "./core/browser.js";
 
 export interface Check {
   name: string;
@@ -22,23 +17,12 @@ export interface Check {
 export interface DoctorDeps {
   bk: Blinkit;
   now: AmazonNow;
-  nodeVersion?: string;
-  /** Whether the compiled CLI exists (the package was built). */
-  built?: () => boolean;
-  locate?: () => FoundBrowser | undefined;
+  find?: () => Promise<string | undefined>;
   /** Start the browser headless and close it; throws when it can't. */
   launch?: (path: string) => Promise<void>;
 }
 
-const MIN_NODE = 22;
-const AMAZON_ADDRESS_FIX = "your address isn't served by Amazon Now; run `blinkit amazon address` to choose another";
-
-const pass = (name: string, detail: string): Check => ({ name, ok: true, detail });
-const fail = (name: string, detail: string, fix: string): Check => ({ name, ok: false, detail, fix });
-const firstLine = (e: unknown) =>
-  e instanceof BlinkitError ? e.reason : (e instanceof Error ? e.message : String(e)).split("\n")[0];
-
-const distBuilt = () => existsSync(fileURLToPath(new URL("../dist/bin/blinkit.js", import.meta.url)));
+const firstLine = (e: unknown) => (e instanceof Error ? e.message : String(e)).split("\n")[0].slice(0, 160);
 
 async function launchHeadless(executablePath: string): Promise<void> {
   const { chromium } = await import("playwright-core");
@@ -46,96 +30,53 @@ async function launchHeadless(executablePath: string): Promise<void> {
   await browser.close();
 }
 
-export async function runDoctor(deps: DoctorDeps): Promise<Check[]> {
-  const { bk, now } = deps;
-  const checks: Check[] = [];
-
-  const node = deps.nodeVersion ?? process.versions.node;
-  checks.push(
-    Number(node.split(".")[0]) >= MIN_NODE
-      ? pass("Node.js", `v${node}`)
-      : fail("Node.js", `v${node} is too old`, `install Node.js ${MIN_NODE} or newer from https://nodejs.org`),
-  );
-
-  checks.push(
-    (deps.built ?? distBuilt)()
-      ? pass("Build", "dist/ is built")
-      : fail("Build", "dist/ is missing", "run `npm run build`"),
-  );
-
-  let browser: FoundBrowser | undefined;
-  let locateError: unknown;
+async function browserCheck({ find = findBrowser, launch = launchHeadless }: DoctorDeps): Promise<Check> {
+  const name = "Browser";
+  const path = await find();
+  if (!path) return { name, ok: false, detail: "no Chromium-based browser found", fix: `run \`${INSTALL_BROWSER}\`` };
   try {
-    browser = (deps.locate ?? locateBrowser)();
+    await launch(path);
+    return { name, ok: true, detail: path };
   } catch (e) {
-    locateError = e; // e.g. BLINKIT_BROWSER points to a missing file
+    const fix = `run \`${INSTALL_BROWSER}\`, or set BLINKIT_BROWSER to a working Chrome`;
+    return { name, ok: false, detail: `${path} won't start: ${firstLine(e)}`, fix };
   }
-  if (locateError) {
-    const fix = locateError instanceof BlinkitError ? locateError.fix : `run \`${INSTALL_BROWSER}\``;
-    checks.push(fail("Browser", firstLine(locateError), fix));
-    checks.push(fail("Browser launch", "skipped: no usable browser", fix));
-  } else if (!browser) {
-    checks.push(fail("Browser", "no Chromium-based browser found", `run \`${INSTALL_BROWSER}\` or \`blinkit setup\``));
-    checks.push(fail("Browser launch", "skipped: no browser", `run \`${INSTALL_BROWSER}\` or \`blinkit setup\``));
-  } else {
-    checks.push(pass("Browser", `${browser.path} (${browser.source})`));
-    try {
-      await (deps.launch ?? launchHeadless)(browser.path);
-      checks.push(pass("Browser launch", "starts headless"));
-    } catch (e) {
-      const fix =
-        browser.source === "env"
-          ? "point BLINKIT_BROWSER at a working Chrome, or unset it"
-          : `run \`${INSTALL_BROWSER}\`, or set BLINKIT_BROWSER to a working Chrome`;
-      checks.push(fail("Browser launch", firstLine(e).slice(0, 160), fix));
-    }
-  }
+}
 
-  if (!bk.loggedIn) {
-    checks.push(fail("Blinkit login", "not logged in", "run `blinkit login <phone>`"));
-  } else {
-    try {
-      await bk.account.addresses(); // proves the saved token still works
-      const phone = bk.account.whoami().phone;
-      checks.push(pass("Blinkit login", `logged in${phone ? ` as ${phone}` : ""}`));
-    } catch (e) {
-      checks.push(
-        fail("Blinkit login", firstLine(e), e instanceof BlinkitError ? e.fix : "run `blinkit login <phone>`"),
-      );
-    }
+async function blinkitCheck(bk: Blinkit): Promise<Check> {
+  const name = "Blinkit";
+  const fix = "run `blinkit login <phone>`";
+  if (!bk.loggedIn) return { name, ok: false, detail: "not logged in", fix };
+  try {
+    await bk.account.addresses(); // proves the saved token still works
+  } catch (e) {
+    return { name, ok: false, detail: firstLine(e), fix };
   }
+  const phone = bk.account.whoami().phone;
+  return { name, ok: true, detail: `logged in${phone ? ` as ${phone}` : ""}` };
+}
 
-  if (!now.loggedIn) {
-    checks.push(fail("Amazon login", "not logged in", "run `blinkit amazon login <phone>`"));
-    checks.push(fail("Amazon address", "skipped: not logged in", "run `blinkit amazon login <phone>`"));
-    checks.push(fail("Amazon Now serves it", "skipped: not logged in", "run `blinkit amazon login <phone>`"));
-    return checks;
-  }
+async function amazonCheck(now: AmazonNow): Promise<Check> {
+  const name = "Amazon Now";
+  const fix = "run `blinkit amazon login <phone>`";
+  if (!now.loggedIn) return { name, ok: false, detail: "not logged in", fix };
   let who: Awaited<ReturnType<AmazonNow["whoami"]>>;
   try {
     who = await now.whoami();
   } catch (e) {
-    // The cookie is there but Amazon won't serve the account: whatever the error says, the session is stale.
-    const fix = AMAZON_RELOGIN;
-    checks.push(fail("Amazon login", firstLine(e), fix));
-    checks.push(fail("Amazon address", "skipped: Amazon login failed", fix));
-    checks.push(fail("Amazon Now serves it", "skipped: Amazon login failed", fix));
-    return checks;
+    return { name, ok: false, detail: firstLine(e), fix }; // the saved session no longer works
   }
-  checks.push(pass("Amazon login", "logged in"));
   const to = "deliverTo" in who ? who.deliverTo : null;
-  if (!to) {
-    const fix = "run `blinkit amazon address`, then `blinkit amazon address use <label>`";
-    checks.push(fail("Amazon address", "none selected", fix));
-    checks.push(fail("Amazon Now serves it", "skipped: no address", fix));
-    return checks;
-  }
+  const pick = "run `blinkit amazon address`, then `blinkit amazon address use <label>`";
+  if (!to) return { name, ok: false, detail: "logged in, no delivery address selected", fix: pick };
   const where = `[${to.label ?? "—"}] ${to.text}`;
-  checks.push(pass("Amazon address", where));
-  checks.push(
-    to.serviceable ? pass("Amazon Now serves it", "yes") : fail("Amazon Now serves it", "no", AMAZON_ADDRESS_FIX),
-  );
-  return checks;
+  return to.serviceable
+    ? { name, ok: true, detail: `delivering to ${where}` }
+    : { name, ok: false, detail: `${where} isn't served by Amazon Now`, fix: pick };
+}
+
+export function runDoctor(deps: DoctorDeps): Promise<Check[]> {
+  return Promise.all([browserCheck(deps), blinkitCheck(deps.bk), amazonCheck(deps.now)]);
 }
 
 /** One line per check: `✓ Name: detail`, or `✗ Name: detail. Fix: command`. */

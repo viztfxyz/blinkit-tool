@@ -5,7 +5,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type { Browser, BrowserContext, Page } from "playwright-core";
-import { ensureBrowser } from "../core/browser.js";
+import { requireBrowser } from "../core/browser.js";
 import { AMAZON_UA, amazonPaths } from "./config.js";
 import type { NowSession } from "./session.js";
 
@@ -23,7 +23,7 @@ export async function openBrowser(
   session: NowSession,
   opts: { headed?: boolean; fresh?: boolean } = {},
 ): Promise<NowBrowser> {
-  const executablePath = await ensureBrowser({ headed: opts.headed });
+  const executablePath = await requireBrowser();
   const { chromium } = await import("playwright-core");
   const browser: Browser = await chromium.launch({ executablePath, headless: !opts.headed, timeout: 60000 });
   const context = await browser.newContext({

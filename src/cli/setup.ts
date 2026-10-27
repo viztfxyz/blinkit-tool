@@ -2,12 +2,13 @@
  * `blinkit setup`: browser, Blinkit login, Amazon login, delivery addresses, then doctor, in one guided
  * run. Each step is skipped when it's already done, so running it again only does what's missing.
  */
+import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
 import type { Command } from "commander";
 import type { AmazonNow } from "../amazon/client.js";
 import type { OtpChannel } from "../amazon/login.js";
 import type { Blinkit } from "../client.js";
-import { ensureBrowser } from "../core/browser.js";
-import { BlinkitError } from "../core/errors.js";
+import { findBrowser, INSTALL_BROWSER } from "../core/browser.js";
 import { allOk, type DoctorDeps, formatChecks, runDoctor } from "../doctor.js";
 import { otpSentLine } from "./amazon.js";
 import { ask, confirm } from "./prompt.js";
@@ -15,14 +16,15 @@ import { ask, confirm } from "./prompt.js";
 const OTP_TRIES = 3;
 const done = (m: string) => console.log(`✓ ${m}`);
 const todo = (m: string) => console.log(`\n→ ${m}`);
-const warn = (e: unknown) => console.log(e instanceof BlinkitError ? `✗ ${e.reason}\n  Fix: ${e.fix}` : `✗ ${e}`);
+const warn = (e: unknown) => console.log(`✗ ${e instanceof Error ? e.message : e}`);
+const label = (a: { label?: string | null; text: string }) => `[${a.label ?? "—"}] ${a.text}`;
 
 /** Pick one of `items`: the only one, or by number. Enter skips. */
-async function pick<T>(items: T[], label: (t: T) => string, what: string): Promise<T | undefined> {
+async function pick<T>(items: T[], show: (t: T) => string): Promise<T | undefined> {
   if (items.length === 1) return items[0];
-  for (const [i, t] of items.entries()) console.log(`  ${i + 1}. ${label(t)}`);
+  for (const [i, t] of items.entries()) console.log(`  ${i + 1}. ${show(t)}`);
   for (;;) {
-    const a = await ask(`Which ${what}? [1-${items.length}, Enter to skip] `);
+    const a = await ask(`Which one? [1-${items.length}, Enter to skip] `);
     if (!a) return undefined;
     const n = Number(a);
     if (Number.isInteger(n) && n >= 1 && n <= items.length) return items[n - 1];
@@ -30,9 +32,9 @@ async function pick<T>(items: T[], label: (t: T) => string, what: string): Promi
 }
 
 /** Ask for the OTP until it's accepted or OTP_TRIES codes were rejected. */
-async function enterOtp(label: string, verify: (code: string) => Promise<unknown>): Promise<boolean> {
+async function enterOtp(name: string, verify: (code: string) => Promise<unknown>): Promise<boolean> {
   for (let i = 0; i < OTP_TRIES; i++) {
-    const code = await ask(`${label} OTP: `);
+    const code = await ask(`${name} OTP: `);
     if (!code) return false;
     try {
       await verify(code);
@@ -44,17 +46,38 @@ async function enterOtp(label: string, verify: (code: string) => Promise<unknown
   return false;
 }
 
-async function blinkitWorks(bk: Blinkit): Promise<boolean> {
-  if (!bk.loggedIn) return false;
-  return bk.account.addresses().then(
-    () => true,
-    () => false,
-  );
+/** `npx playwright install chromium`, from our own playwright-core so the build matches what launches it. */
+function installChromium(): Promise<void> {
+  const cli = createRequire(import.meta.url).resolve("playwright-core/cli.js");
+  return new Promise((resolve, reject) => {
+    spawn(process.execPath, [cli, "install", "chromium"], { stdio: "inherit" })
+      .on("error", reject)
+      .on("exit", (code) => (code === 0 ? resolve() : reject(new Error(`playwright install exited with ${code}`))));
+  });
+}
+
+async function browser(interactive: boolean): Promise<void> {
+  todo("Browser");
+  const found = await findBrowser();
+  if (found) return done(`Browser: ${found}`);
+  if (!interactive || !(await confirm("No Chromium-based browser found. Download one with Playwright?"))) {
+    return console.log(`Skipped. Install Chrome, or run \`${INSTALL_BROWSER}\`.`);
+  }
+  await installChromium();
+  done(`Browser: ${await findBrowser()}`);
 }
 
 async function blinkitLogin(bk: Blinkit): Promise<void> {
   todo("Blinkit login");
-  if (await blinkitWorks(bk)) return done(`Blinkit: already logged in as ${bk.account.whoami().phone ?? "you"}`);
+  if (
+    bk.loggedIn &&
+    (await bk.account.addresses().then(
+      () => true,
+      () => false,
+    ))
+  ) {
+    return done(`Blinkit: already logged in as ${bk.account.whoami().phone ?? "you"}`);
+  }
   const phone = await ask("Blinkit mobile number (Enter to skip): ");
   if (!phone) return console.log("Skipped Blinkit.");
   await bk.account.requestOtp(phone);
@@ -65,52 +88,33 @@ async function blinkitLogin(bk: Blinkit): Promise<void> {
 async function blinkitAddress(bk: Blinkit): Promise<void> {
   if (!bk.loggedIn) return;
   todo("Blinkit delivery address");
-  if (bk.state.address) return done(`Blinkit: delivering to [${bk.state.address.label}] ${bk.state.address.text}`);
+  if (bk.state.address) return done(`Blinkit: delivering to ${label(bk.state.address)}`);
   const list = await bk.account.addresses();
-  if (!list.length) {
-    return console.log("No saved Blinkit addresses. Add one with `blinkit address add`, then run setup again.");
-  }
-  const a = await pick(list, (x) => `[${x.label ?? "—"}] ${x.text}`, "address");
+  if (!list.length) return console.log("No saved Blinkit addresses. Add one with `blinkit address add`.");
+  const a = await pick(list, label);
   if (!a) return console.log("Skipped the Blinkit address.");
   const r = await bk.account.useAddress(String(a.id));
-  done(`Blinkit: delivering to [${r.address.label}] ${r.address.text}`);
-}
-
-async function amazonWorks(now: AmazonNow): Promise<boolean> {
-  if (!now.loggedIn) return false;
-  return now.whoami().then(
-    () => true,
-    () => false,
-  );
+  done(`Blinkit: delivering to ${label(r.address)}`);
 }
 
 async function amazonLogin(now: AmazonNow): Promise<void> {
   todo("Amazon login");
-  if (await amazonWorks(now)) return done("Amazon: already logged in");
+  if (
+    now.loggedIn &&
+    (await now.whoami().then(
+      () => true,
+      () => false,
+    ))
+  )
+    return done("Amazon: already logged in");
   // Only a number typed now: never fall back to a saved one, so no OTP goes out unasked.
   const phone = await ask("Amazon mobile number (Enter to skip): ");
   if (!phone) return console.log("Skipped Amazon.");
-  let via: OtpChannel = (await ask("Send the OTP by SMS or WhatsApp? [sms] ")).toLowerCase().startsWith("w")
-    ? "whatsapp"
-    : "sms";
+  const answer = await ask("Send the OTP by SMS or WhatsApp? [sms] ");
+  const via: OtpChannel = answer.toLowerCase().startsWith("w") ? "whatsapp" : "sms";
   try {
-    for (;;) {
-      try {
-        console.log("Opening Amazon sign-in (takes a few seconds)…");
-        const r = await now.requestOtp(phone, via);
-        // Say where it actually went: Amazon sometimes picks the other channel.
-        console.log(
-          r.channel === "unknown" ? `${otpSentLine(r)} (Amazon didn't say: SMS or WhatsApp)` : otpSentLine(r),
-        );
-        break;
-      } catch (e) {
-        warn(e);
-        const other: OtpChannel = via === "sms" ? "whatsapp" : "sms";
-        const notSent = e instanceof BlinkitError && /couldn.?t send the OTP/i.test(e.reason);
-        if (!notSent || !(await confirm(`Try ${other} instead?`))) return;
-        via = other;
-      }
-    }
+    console.log("Opening Amazon sign-in (takes a few seconds)…");
+    console.log(otpSentLine(await now.requestOtp(phone, via)));
     if (await enterOtp("Amazon", (code) => now.verifyOtp(code))) done("Amazon: logged in");
   } finally {
     await now.cancelLogin(); // closes the sign-in browser if the OTP never succeeded
@@ -122,17 +126,13 @@ async function amazonAddress(now: AmazonNow): Promise<void> {
   todo("Amazon delivery address");
   const list = await now.addresses();
   const current = list.find((a) => a.selected);
-  if (current?.serviceable) return done(`Amazon: delivering to [${current.label ?? "—"}] ${current.text}`);
+  if (current?.serviceable) return done(`Amazon: delivering to ${label(current)}`);
   const served = list.filter((a) => a.serviceable);
-  if (!served.length) {
-    return console.log(
-      "None of your Amazon addresses is served by Amazon Now. Add one on amazon.in, then run setup again.",
-    );
-  }
-  const a = await pick(served, (x) => `[${x.label ?? "—"}] ${x.text}`, "address");
+  if (!served.length)
+    return console.log("None of your Amazon addresses is served by Amazon Now. Add one on amazon.in.");
+  const a = await pick(served, label);
   if (!a) return console.log("Skipped the Amazon address.");
-  const used = await now.useAddress(a.id);
-  done(`Amazon: delivering to [${used.label ?? "—"}] ${used.text}`);
+  done(`Amazon: delivering to ${label(await now.useAddress(a.id))}`);
 }
 
 export interface SetupDeps {
@@ -146,28 +146,13 @@ export interface SetupDeps {
 
 /** The whole guided run; true when doctor ends all ✓. */
 export async function runSetup({ bk, now, interactive, doctor }: SetupDeps): Promise<boolean> {
-  todo("Browser");
-  try {
-    // The download prompt is only enabled on a terminal (see run() in main.ts); otherwise this just finds one.
-    done(`Browser: ${await ensureBrowser()}`);
-  } catch (e) {
-    warn(e);
-  }
+  await browser(interactive).catch(warn);
   if (interactive) {
     // A failed step is reported and setup moves on; doctor at the end lists whatever is still missing.
-    for (const step of [
-      () => blinkitLogin(bk),
-      () => blinkitAddress(bk),
-      () => amazonLogin(now),
-      () => amazonAddress(now),
-    ]) {
-      await step().catch(warn);
-    }
+    for (const step of [blinkitLogin, blinkitAddress]) await step(bk).catch(warn);
+    for (const step of [amazonLogin, amazonAddress]) await step(now).catch(warn);
   } else {
-    console.log(
-      "\nstdin isn't a terminal, so setup won't log in or download anything.\n" +
-        "Fix: run `blinkit setup` in a terminal, or the Fix commands below.",
-    );
+    console.log("\nstdin isn't a terminal, so setup won't log in or download anything.");
   }
   todo("Checking everything (blinkit doctor)");
   const checks = await runDoctor({ ...doctor, bk, now });

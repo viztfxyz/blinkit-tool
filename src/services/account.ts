@@ -29,11 +29,7 @@ export class Account {
     const digits = String(phone).replace(/\D/g, "").slice(-10);
     if (!/^[6-9]\d{9}$/.test(digits)) throw new BlinkitError("phone must be a 10-digit Indian mobile number");
     const data = await this.core.req("POST", "/v2/accounts/", { form: { user_phone: digits } });
-    if (!data.success) {
-      throw new BlinkitError(data.message || "OTP request rejected", {
-        fix: "wait a minute, then run `blinkit login <phone>` again",
-      });
-    }
+    if (!data.success) throw new BlinkitError(data.message || "OTP request rejected");
     this.core.state.pendingPhone = digits;
     this.core.save();
     return { otpSent: true, message: data.message };
@@ -46,11 +42,7 @@ export class Account {
     const data = await this.core.req("POST", "/v2/accounts/verify/phone/code/", {
       form: { user_phone: userPhone, verify_code: String(code).trim() },
     });
-    if (!data.verified || !data.access_token) {
-      throw new BlinkitError(data.message || "OTP rejected", {
-        fix: "run `blinkit verify <code>` with the newest code, or `blinkit login <phone>` for a new one",
-      });
-    }
+    if (!data.verified || !data.access_token) throw new BlinkitError(data.message || "OTP rejected");
     const user = data.user ?? {};
     Object.assign(this.core.state, { accessToken: data.access_token, user: { id: user.id, phone: user.phone } });
     delete this.core.state.pendingPhone;

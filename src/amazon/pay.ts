@@ -11,7 +11,6 @@
  */
 import type { Locator, Page } from "playwright-core";
 import { BlinkitError } from "../core/errors.js";
-import { RECONFIRM_AMAZON } from "../core/fixes.js";
 import {
   type HandoffResult,
   handOffOrder,
@@ -52,9 +51,6 @@ const paise = (n: number) => Math.round(n * 100);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Why the bill must not be paid, or null. */
-/** The fix for a `billProblem`: an amount mismatch means re-confirming against the fresh bill. */
-export const problemFix = (problem: string) => (/^amount to pay/.test(problem) ? RECONFIRM_AMAZON : undefined);
-
 export function billProblem(bill: NowBill, confirmAmount: number): string | null {
   if (!Number.isFinite(confirmAmount) || paise(confirmAmount) !== paise(bill.total)) {
     return `amount to pay is ₹${bill.total}, not ₹${confirmAmount}; confirm ₹${bill.total} to proceed`;
@@ -254,7 +250,7 @@ export async function payNow(deps: NowPayDeps, opts: NowPayOptions): Promise<Now
   deps.session.requireLogin();
   const bill = await deps.checkout();
   const problem = billProblem(bill, opts.confirmAmount);
-  if (problem) throw new BlinkitError(problem, { fix: problemFix(problem) });
+  if (problem) throw new BlinkitError(problem);
   const cart = await deps.cart();
   const amount = bill.total;
   const base = { amount, handoff: mode, purchaseId: bill.purchaseId };
