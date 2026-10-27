@@ -49,7 +49,18 @@ export class NowLogin {
       await page.goto(NOW_SIGNIN, { waitUntil: "domcontentloaded" });
       const id = page.locator("#ap_email_login, #ap_email").first();
       await id.waitFor({ state: "visible", timeout: 20000 });
-      await id.fill(digits);
+      await id.click();
+      await id.fill("");
+      await id.pressSequentially(`+91${digits}`, { delay: 80 });
+      // Amazon's unified claim page (/ax/claim) leaves the hidden countryCode empty when headless; set it so the number validates.
+      await page
+        .evaluate(() => {
+          const cc = document.querySelector<HTMLInputElement>("input[name=countryCode]");
+          if (cc && !cc.value) cc.value = "IN";
+        })
+        .catch(() => undefined);
+      await id.blur();
+      await sleep(800);
       await clickAndSettle(page, page.locator("input#continue, input[type=submit]").first());
       await this.reachOtp(page, channel);
       this.pending = { b, phone: digits };
@@ -78,7 +89,10 @@ export class NowLogin {
           `Amazon wants a captcha before sending the OTP; try again later (${await snapshot(page)})`,
         );
       }
-      if (/new to Amazon|create (your )?account/i.test(text) && !/Sign in another way/i.test(text)) {
+      if (
+        /looks like you.?re new to Amazon|no account found|cannot find an account/i.test(text) ||
+        page.url().includes("/ap/register")
+      ) {
         throw new BlinkitError("there is no Amazon account for this number");
       }
       // "Use your passkey" → the full list of sign-in methods. Headless Chromium has no passkey, so
@@ -99,7 +113,9 @@ export class NowLogin {
         await clickAndSettle(page, otp.first());
         continue;
       }
-      const errors = page.locator("#auth-error-message-box, .a-alert-error").filter({ visible: true });
+      const errors = page
+        .locator("#auth-error-message-box, .a-alert-error, .a-alert-inline-error")
+        .filter({ visible: true });
       const error = (await errors.allInnerTexts().catch(() => [])).join(" ").replace(/\s+/g, " ").trim();
       if (error && !/passkey/i.test(error)) throw new BlinkitError(`Amazon: ${error}`);
       if (await visible(page, "#ap_password")) {

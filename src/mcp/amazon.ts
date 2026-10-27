@@ -90,7 +90,8 @@ export function registerAmazonTools(server: McpServer, now = new AmazonNow()): v
   server.registerTool(
     "amazon_now_cart_set",
     {
-      description: "Set absolute quantities in the Amazon Now cart (0 removes). Returns the cart.",
+      description:
+        "Set absolute quantities in the Amazon Now cart (0 removes). Pass items: [{ asin, quantity }] (an array, unlike blinkit_cart_set). Returns the cart.",
       inputSchema: {
         items: z.array(z.object({ asin: z.string(), quantity: z.number().int().min(0) })).min(1),
       },
