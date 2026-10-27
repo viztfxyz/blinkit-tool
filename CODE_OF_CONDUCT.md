@@ -9,6 +9,6 @@ phone numbers and addresses from bug reports) are not acceptable in any project 
 ## Reporting
 
 If someone's behaviour worries you, contact the maintainer privately through the email on their GitHub profile,
-or open a [private security advisory](https://github.com/viztfxyz/blinkit-tool/security/advisories/new) if you'd rather
+or open a [private security advisory](https://github.com/viztfxyz/handcart/security/advisories/new) if you'd rather
 not use email. Reports are handled confidentially. The maintainer may remove comments, lock threads, or block
 contributors who break these rules, as described in the Covenant's enforcement guidelines.

@@ -17,8 +17,8 @@ Never paste your `session.json`, OTPs, access tokens, pay links or full delivery
 You need Node.js 20 or newer (the version in `.nvmrc` is what CI uses).
 
 ```bash
-git clone https://github.com/viztfxyz/blinkit-tool.git
-cd blinkit-tool
+git clone https://github.com/viztfxyz/handcart.git
+cd handcart
 npm install
 npm run check        # lint + typecheck + tests
 ```
@@ -66,7 +66,7 @@ BLINKIT_SESSION=/tmp/blinkit-dev.json npm run dev -- location 560034
 
 ### Testing payment changes
 
-Changes under `src/pay/` can place real orders. Use `blinkit pay --dry-run` first, test with a cheap cart, and say
+Changes under `src/pay/` can place real orders. Use `handcart <platform> pay --dry-run` first, test with a cheap cart, and say
 in the pull request how you tested.
 
 ## Commit messages
