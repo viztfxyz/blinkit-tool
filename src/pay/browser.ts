@@ -26,7 +26,23 @@ function isRunnableBrowser(bin: string): boolean {
   }
 }
 
-function findBrowser(): string | undefined {
+/** Chromium that `npx playwright install chromium` downloaded: often the only browser on a headless box. */
+function playwrightChromium(): string | undefined {
+  const root = process.env.PLAYWRIGHT_BROWSERS_PATH || join(homedir(), ".cache", "ms-playwright");
+  if (!existsSync(root)) return undefined;
+  const builds = readdirSync(root)
+    .filter((d) => /^chromium-\d+$/.test(d))
+    .sort((a, b) => Number(b.split("-")[1]) - Number(a.split("-")[1]));
+  for (const build of builds) {
+    for (const bin of ["chrome-linux64/chrome", "chrome-linux/chrome", "chrome-win/chrome.exe"]) {
+      const p = join(root, build, bin);
+      if (existsSync(p)) return p;
+    }
+  }
+  return undefined;
+}
+
+export function findBrowser(): string | undefined {
   if (process.env.BLINKIT_BROWSER) return process.env.BLINKIT_BROWSER;
   const mac = ["Google Chrome", "Chromium", "Brave Browser", "Microsoft Edge", "Arc"].map(
     (app) => `/Applications/${app}.app/Contents/MacOS/${app}`,
@@ -54,7 +70,7 @@ function findBrowser(): string | undefined {
       if (isRunnableBrowser(p)) return p;
     }
   }
-  return undefined;
+  return playwrightChromium();
 }
 
 /** On Linux, run Chromium on X11 (XWayland on Wayland desktops): Playwright + Wayland can hang. */

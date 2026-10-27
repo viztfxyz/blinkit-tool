@@ -118,6 +118,36 @@ image attached to the status result).
 The server's instructions tell agents never to request an OTP for a number the user didn't give, and never to call
 `blinkit_pay` without explicit confirmation of the exact amount.
 
+## Amazon Now
+
+The same CLI also drives [Amazon Now](https://www.amazon.in) (Amazon's 10-minute delivery in India) under
+`blinkit amazon`, and the MCP server exposes it as `amazon_now_*` tools.
+
+```bash
+blinkit amazon login 98xxxxxxxx           # OTP by SMS (--via whatsapp also works)
+blinkit amazon search "amul milk" --in-stock
+blinkit amazon cart add B018E0HQPE -q 2   # products are ASINs
+blinkit amazon checkout                   # payable bill for your selected Amazon address
+blinkit amazon pay --confirm 106          # the exact amount checkout showed
+blinkit amazon orders                     # delivery and payment state
+```
+
+- **Works on a headless server.** Amazon's sign-in and payment pages need a real browser, so `login` and `pay` run
+  Chromium headless; everything else is plain HTTP. If no Chrome/Chromium is installed, run
+  `npx playwright install chromium`.
+- **Login runs in one process.** `blinkit amazon login` waits for the OTP at a prompt; over MCP the server keeps the
+  sign-in open between `amazon_now_login_request_otp` and `amazon_now_login_verify_otp`.
+- **Pay is UPI QR only and never uses Amazon Pay balance.** Amazon pre-selects your balance on its payment page;
+  `pay` picks "Scan and Pay with UPI" and refuses to press Pay unless that is the only selection, the total is the
+  amount you confirmed, and the bill shows no balance applied. The QR is a normal merchant UPI QR (it checks the
+  amount inside it) handed over like Blinkit's: a qrbaton pay link or, with `--handoff qr`, the image.
+- Pressing Pay places the order. The QR is valid for about 10 minutes; if nobody pays, Amazon cancels the order.
+  Use `--dry-run` to stop on the payment page with UPI selected, before the order is placed.
+- Delivery goes to the address selected in your Amazon account.
+
+The session is a cookie file at `~/.config/blinkit-tool/amazon-now.cookies` (`AMAZON_NOW_COOKIES` to override),
+readable only by you. Treat it like a password.
+
 ## Library
 
 ```ts
@@ -135,11 +165,12 @@ console.log((await bk.cart.get()).bill.toPay);
 
 ## Configuration
 
-| Variable          | Purpose                                                                           |
-| ----------------- | --------------------------------------------------------------------------------- |
-| `BLINKIT_SESSION` | Session file (default `~/.config/blinkit-tool/session.json`, owner-readable only) |
-| `BLINKIT_BROWSER` | Chromium-based browser for the browser pay path (auto-detected otherwise)         |
-| `QRBATON_URL`     | qrbaton host, if you run your own (default `https://qrbaton.vercel.app`)          |
+| Variable             | Purpose                                                                           |
+| -------------------- | --------------------------------------------------------------------------------- |
+| `BLINKIT_SESSION`    | Session file (default `~/.config/blinkit-tool/session.json`, owner-readable only) |
+| `BLINKIT_BROWSER`    | Chromium-based browser for the browser pay path (auto-detected otherwise)         |
+| `QRBATON_URL`        | qrbaton host, if you run your own (default `https://qrbaton.vercel.app`)          |
+| `AMAZON_NOW_COOKIES` | Amazon Now session file (default `~/.config/blinkit-tool/amazon-now.cookies`)     |
 
 Caches (pincode lookups, category tree, last pay status, QR image) live in `~/.cache/blinkit-tool/`.
 

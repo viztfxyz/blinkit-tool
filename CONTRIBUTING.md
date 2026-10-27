@@ -53,6 +53,7 @@ BLINKIT_SESSION=/tmp/blinkit-dev.json npm run dev -- location 560034
 | `src/core/`     | Config, HTTP transport (Chrome TLS impersonation), session, storage, errors |
 | `src/services/` | Catalog, cart, account, and parsing of Blinkit's layout payloads            |
 | `src/pay/`      | zpaykit API path, browser fallback, QR decoding, qrbaton / QR handoff       |
+| `src/amazon/`   | Amazon Now: OTP login and UPI QR pay in headless Chromium; HTTP otherwise   |
 | `src/cli/`      | Commander commands and terminal output                                      |
 | `src/mcp/`      | MCP tool definitions                                                        |
 | `src/bin/`      | Executable entry points                                                     |

@@ -5,6 +5,7 @@ import { SORTS, type Sort, VERSION } from "../core/config.js";
 import { BlinkitError } from "../core/errors.js";
 import { HANDOFFS, type Handoff, payWithUpi } from "../pay/index.js";
 import type { SearchOptions } from "../services/catalog.js";
+import { registerAmazon } from "./amazon.js";
 import * as fmt from "./format.js";
 
 const int = (v: string) => {
@@ -233,6 +234,10 @@ program
     console.log(msg[r.stage] ?? r.stage);
     if (r.error) console.log("error:", r.error);
   });
+
+// ---------- Amazon Now ----------
+
+registerAmazon(program);
 
 program
   .command("mcp")

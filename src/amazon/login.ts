@@ -1,0 +1,155 @@
+/**
+ * Amazon login by OTP, in headless Chromium. Amazon's sign-in screens (passkey prompt, "sign in
+ * another way", WhatsApp/SMS OTP) only exist as pages, so the browser stays open between sending the
+ * OTP and verifying it: both steps must run in the same process (interactive CLI, or the MCP server).
+ */
+import type { Page } from "playwright-core";
+import { BlinkitError } from "../core/errors.js";
+import { maskPhone } from "../services/parsing.js";
+import { type NowBrowser, openBrowser, pageText, snapshot } from "./browser.js";
+import { AUTH_COOKIE, NOW_HOME, NOW_SIGNIN } from "./config.js";
+import type { NowSession } from "./session.js";
+
+export type OtpChannel = "sms" | "whatsapp";
+export const OTP_CHANNELS = ["sms", "whatsapp"] as const satisfies readonly OtpChannel[];
+
+const OTP_INPUT = "#ap_otp_code, input[name=otpCode], #cvf-input-code, input[name=code]";
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function visible(page: Page, selector: string): Promise<boolean> {
+  return page
+    .locator(selector)
+    .first()
+    .isVisible()
+    .catch(() => false);
+}
+
+/** Click and wait for whatever navigation it triggers to settle. */
+async function clickAndSettle(page: Page, target: ReturnType<Page["locator"]>): Promise<void> {
+  await Promise.all([
+    page.waitForLoadState("domcontentloaded").catch(() => undefined),
+    target.click({ timeout: 10000 }),
+  ]);
+  await sleep(2500);
+}
+
+export class NowLogin {
+  private pending?: { b: NowBrowser; phone: string };
+
+  constructor(private session: NowSession) {}
+
+  /** Send a login OTP to the Amazon account's mobile number (SMS by default). */
+  async requestOtp(phone: string, channel: OtpChannel = "sms") {
+    const digits = String(phone).replace(/\D/g, "").slice(-10);
+    if (!/^[6-9]\d{9}$/.test(digits)) throw new BlinkitError("phone must be a 10-digit Indian mobile number");
+    await this.cancel();
+    const b = await openBrowser(this.session, { fresh: true });
+    try {
+      const { page } = b;
+      await page.goto(NOW_SIGNIN, { waitUntil: "domcontentloaded" });
+      const id = page.locator("#ap_email_login, #ap_email").first();
+      await id.waitFor({ state: "visible", timeout: 20000 });
+      await id.fill(digits);
+      await clickAndSettle(page, page.locator("input#continue, input[type=submit]").first());
+      await this.reachOtp(page, channel);
+      this.pending = { b, phone: digits };
+      const sentVia: OtpChannel = /Verify with WhatsApp/i.test(await pageText(page)) ? "whatsapp" : "sms";
+      return { otpSent: true as const, channel: sentVia, to: maskPhone(digits) };
+    } catch (e) {
+      await b.discard();
+      throw e;
+    }
+  }
+
+  /** Walk from the screen after the phone number to the OTP entry form, asking for an OTP on the way. */
+  private async reachOtp(page: Page, channel: OtpChannel): Promise<void> {
+    for (let step = 0; step < 6; step++) {
+      const text = await pageText(page);
+      if (await visible(page, OTP_INPUT)) {
+        const sms = page.getByText(/Send OTP by SMS/i).first();
+        if (channel === "sms" && /WhatsApp/i.test(text) && (await sms.isVisible().catch(() => false))) {
+          await clickAndSettle(page, sms);
+          continue;
+        }
+        return;
+      }
+      if (await visible(page, "#captchacharacters, img[src*='captcha' i]")) {
+        throw new BlinkitError(
+          `Amazon wants a captcha before sending the OTP; try again later (${await snapshot(page)})`,
+        );
+      }
+      if (/new to Amazon|create (your )?account/i.test(text) && !/Sign in another way/i.test(text)) {
+        throw new BlinkitError("there is no Amazon account for this number");
+      }
+      const error = await page
+        .locator("#auth-error-message-box, .a-alert-error")
+        .first()
+        .innerText()
+        .catch(() => "");
+      if (error.trim()) throw new BlinkitError(`Amazon: ${error.replace(/\s+/g, " ").trim()}`);
+
+      // "Use your passkey" → the full list of sign-in methods.
+      const more = await page
+        .locator("a.ax-challenge-more")
+        .first()
+        .getAttribute("href")
+        .catch(() => null);
+      if (more) {
+        await page.goto(new URL(more, page.url()).href, { waitUntil: "domcontentloaded" });
+        await sleep(2000);
+        continue;
+      }
+      // Method list, or a password page offering an OTP instead.
+      const otp = page.getByText(/Send OTP|Get an OTP|Sign in with OTP|one time password/i).first();
+      if (await otp.isVisible().catch(() => false)) {
+        await clickAndSettle(page, otp);
+        continue;
+      }
+      if (await visible(page, "#ap_password")) {
+        throw new BlinkitError("Amazon only offered password sign-in for this account; OTP login isn't available");
+      }
+      break;
+    }
+    throw new BlinkitError(`Amazon showed an unexpected sign-in screen (${await snapshot(page)})`);
+  }
+
+  /** Finish login with the OTP. The session cookies are saved for HTTP use. */
+  async verifyOtp(code: string) {
+    const p = this.pending;
+    if (!p) {
+      throw new BlinkitError(
+        "no Amazon OTP is waiting in this session; request one first (`blinkit amazon login <phone>` prompts for it)",
+      );
+    }
+    const { page, context } = p.b;
+    const otp = String(code).replace(/\s/g, "");
+    if (!/^\d{4,8}$/.test(otp)) throw new BlinkitError("OTP should be 4–8 digits");
+    await page.locator(OTP_INPUT).first().fill(otp);
+    await clickAndSettle(page, page.locator("#cvf-submit-otp-button input, input[type=submit]").first());
+    for (let i = 0; i < 20; i++) {
+      if ((await context.cookies()).some((c) => c.name === AUTH_COOKIE && c.value)) {
+        await page.goto(NOW_HOME, { waitUntil: "domcontentloaded" }).catch(() => undefined);
+        await sleep(3000);
+        await p.b.close();
+        this.pending = undefined;
+        return { loggedIn: true as const, phone: maskPhone(p.phone) };
+      }
+      if (await visible(page, OTP_INPUT)) {
+        const msg = await page
+          .locator(".a-alert-error, #auth-error-message-box, .cvf-widget-alert")
+          .first()
+          .innerText()
+          .catch(() => "");
+        if (msg.trim()) throw new BlinkitError(`OTP rejected: ${msg.replace(/\s+/g, " ").trim()}`);
+      }
+      await sleep(1000);
+    }
+    throw new BlinkitError(`Amazon didn't finish the login after the OTP (${await snapshot(page)})`);
+  }
+
+  async cancel(): Promise<void> {
+    const p = this.pending;
+    this.pending = undefined;
+    if (p) await p.b.discard();
+  }
+}

@@ -94,9 +94,26 @@ export function qrbatonOrder(input: HandoffInput): QrbatonOrder {
 }
 
 /** Write the QR and, for "qrbaton", create the pay page. Falls back to the bare QR if qrbaton fails. */
-export async function handOff(mode: Handoff, input: HandoffInput): Promise<HandoffResult> {
+export function handOff(mode: Handoff, input: HandoffInput): Promise<HandoffResult> {
+  return handOffOrder(mode, { ...input, order: qrbatonOrder(input) });
+}
+
+/** What any store needs to hand a UPI payment over: the QR and an order summary for the pay page. */
+export interface OrderHandoffInput {
+  order: QrbatonOrder;
+  /** The upi://pay intent, when known. */
+  upiIntent?: string | null;
+  /** The captured QR image, used when the intent could not be read. */
+  qrPng?: Buffer;
+  /** How long the pay page stays open. */
+  ttlSec?: number;
+  /** Where the QR PNG is written (default: Blinkit's `upi_qr.png`). */
+  qrPath?: string;
+}
+
+export async function handOffOrder(mode: Handoff, input: OrderHandoffInput): Promise<HandoffResult> {
   const upiIntent = input.upiIntent ?? undefined;
-  const qrImage = await writeQr(paths.qr, { upiIntent, png: input.qrPng });
+  const qrImage = await writeQr(input.qrPath ?? paths.qr, { upiIntent, png: input.qrPng });
   const qrOnly: HandoffResult = { handoff: "qr", qrImage, ...(upiIntent ? { upiIntent } : {}) };
   if (mode === "qr") return qrOnly;
   try {
@@ -105,7 +122,7 @@ export async function handOff(mode: Handoff, input: HandoffInput): Promise<Hando
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         ...(upiIntent ? { upi: upiIntent } : { qr: readFileSync(qrImage).toString("base64") }),
-        order: qrbatonOrder(input),
+        order: input.order,
         ...(input.ttlSec ? { ttlSec: Math.min(86400, Math.max(60, Math.round(input.ttlSec))) } : {}),
       }),
       signal: AbortSignal.timeout(15_000),

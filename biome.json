@@ -5,5 +5,11 @@
   "formatter": { "enabled": true, "indentStyle": "space", "indentWidth": 2, "lineWidth": 120 },
   "linter": { "enabled": true, "rules": { "preset": "recommended" } },
   "javascript": { "formatter": { "quoteStyle": "double", "trailingCommas": "all" } },
-  "assist": { "enabled": true, "actions": { "source": { "organizeImports": "on" } } }
+  "assist": { "enabled": true, "actions": { "source": { "organizeImports": "on" } } },
+  "overrides": [
+    {
+      "includes": ["src/amazon/**"],
+      "linter": { "rules": { "performance": { "useDomNodeTextContent": "off" } } }
+    }
+  ]
 }

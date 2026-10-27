@@ -4,11 +4,14 @@ import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import { AmazonNow } from "../amazon/client.js";
 import { Blinkit } from "../client.js";
 import { SORTS, VERSION } from "../core/config.js";
 import { BlinkitError } from "../core/errors.js";
 import { HANDOFFS, type Handoff, readPayStatus, writePayStatus } from "../pay/index.js";
 import type { SearchOptions } from "../services/catalog.js";
+import { AMAZON_INSTRUCTIONS, registerAmazonTools } from "./amazon.js";
+import { ok, tool } from "./tools.js";
 
 const INSTRUCTIONS = `Unofficial Blinkit tools.
 Flow: blinkit_session → (optional) blinkit_login_request_otp + blinkit_login_verify_otp → blinkit_addresses →
@@ -40,22 +43,11 @@ const filters = {
     ),
 };
 
-const ok = (data: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] });
-
-/** Wrap a handler so BlinkitErrors come back as tool errors the agent can read. */
-const tool =
-  <A>(fn: (args: A) => unknown) =>
-  async (args: A) => {
-    try {
-      return ok(await fn(args));
-    } catch (e) {
-      const text = e instanceof BlinkitError ? e.message : `unexpected error: ${(e as Error).message}`;
-      return { content: [{ type: "text" as const, text }], isError: true };
-    }
-  };
-
-export function createServer(bk = new Blinkit()): McpServer {
-  const server = new McpServer({ name: "blinkit", version: VERSION }, { instructions: INSTRUCTIONS });
+export function createServer(bk = new Blinkit(), now = new AmazonNow()): McpServer {
+  const server = new McpServer(
+    { name: "blinkit", version: VERSION },
+    { instructions: `${INSTRUCTIONS}\n\n${AMAZON_INSTRUCTIONS}` },
+  );
 
   server.registerTool(
     "blinkit_session",
@@ -299,6 +291,7 @@ export function createServer(bk = new Blinkit()): McpServer {
       return result;
     },
   );
+  registerAmazonTools(server, now);
   return server;
 }
 
