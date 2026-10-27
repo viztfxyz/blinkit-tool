@@ -12,6 +12,7 @@ import type {
 import type { PayOptions, PayStatus } from "../../pay/index.js";
 import type { Platform, PlatformDescriptor } from "../registry.js";
 import { Zepto } from "./client.js";
+import { zeptoPaths } from "./config.js";
 import { readZeptoPayStatus } from "./pay.js";
 import type { ZeptoAddress, ZeptoBill, ZeptoCart, ZeptoCartLine, ZeptoProduct } from "./types.js";
 
@@ -162,6 +163,10 @@ class ZeptoPlatform implements Platform {
 
   payStatus(): PayStatus {
     return readZeptoPayStatus();
+  }
+
+  payStatusFile(): string {
+    return zeptoPaths.payStatus;
   }
 }
 
