@@ -125,6 +125,8 @@ The same CLI also drives [Amazon Now](https://www.amazon.in) (Amazon's 10-minute
 
 ```bash
 blinkit amazon login 98xxxxxxxx           # OTP by SMS (--via whatsapp also works)
+blinkit amazon address                    # saved addresses; * = in use
+blinkit amazon address use home           # label, id, or part of the address
 blinkit amazon search "amul milk" --in-stock
 blinkit amazon cart add B018E0HQPE -q 2   # products are ASINs
 blinkit amazon checkout                   # payable bill for your selected Amazon address
@@ -141,9 +143,11 @@ blinkit amazon orders                     # delivery and payment state
   `pay` picks "Scan and Pay with UPI" and refuses to press Pay unless that is the only selection, the total is the
   amount you confirmed, and the bill shows no balance applied. The QR is a normal merchant UPI QR (it checks the
   amount inside it) handed over like Blinkit's: a qrbaton pay link or, with `--handoff qr`, the image.
-- Pressing Pay places the order. The QR is valid for about 10 minutes; if nobody pays, Amazon cancels the order.
+- Pressing Pay places the order. The QR carries its own expiry (about 10 minutes so far), which `pay` reads and
+  reports as `qrExpiresAt`; if nobody pays by then, Amazon cancels the order.
   Use `--dry-run` to stop on the payment page with UPI selected, before the order is placed.
-- Delivery goes to the address selected in your Amazon account.
+- Delivery goes to the saved address in use (`blinkit amazon address`). Only addresses Amazon Now serves can be
+  picked; prices and stock can change with the address, so check `checkout` again after switching.
 
 The session is a cookie file at `~/.config/blinkit-tool/amazon-now.cookies` (`AMAZON_NOW_COOKIES` to override),
 readable only by you. Treat it like a password.

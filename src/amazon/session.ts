@@ -97,6 +97,11 @@ export class NowSession {
     return token;
   }
 
+  /** Forget the cached store group: a different address may be served by a different store. */
+  resetStore(): void {
+    this.groupId = undefined;
+  }
+
   /** The store group the session is served from; search and cart calls send it as `tez-group-id`. */
   private async storeGroup(): Promise<string> {
     if (this.groupId) return this.groupId;

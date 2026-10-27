@@ -12,9 +12,9 @@ import { ok, tool } from "./tools.js";
 
 export const AMAZON_INSTRUCTIONS = `Amazon Now (amazon.in 10-minute delivery) tools, separate from Blinkit:
 amazon_now_session → (if not logged in) amazon_now_login_request_otp + amazon_now_login_verify_otp →
-amazon_now_search → amazon_now_cart_set (by ASIN) → amazon_now_checkout → (user confirms the amount)
+(optional) amazon_now_addresses + amazon_now_use_address → amazon_now_search → amazon_now_cart_set (by ASIN) → amazon_now_checkout → (user confirms the amount)
 amazon_now_pay → amazon_now_pay_status → send the payLink (or, with handoff "qr", the QR image).
-Delivery goes to the account's selected Amazon address; show it from amazon_now_checkout.
+Delivery goes to the selected saved address (amazon_now_session / amazon_now_addresses); confirm it with the user.
 Amazon Now pay always uses a UPI QR and never Amazon Pay balance.`;
 
 export function registerAmazonTools(server: McpServer, now = new AmazonNow()): void {
@@ -44,6 +44,23 @@ export function registerAmazonTools(server: McpServer, now = new AmazonNow()): v
     "amazon_now_logout",
     { description: "Forget the Amazon session." },
     tool(() => now.logout()),
+  );
+  server.registerTool(
+    "amazon_now_addresses",
+    {
+      description:
+        "Saved Amazon addresses: id, label, text, serviceable (Amazon Now delivers there), selected (in use), isDefault.",
+    },
+    tool(() => now.addresses()),
+  );
+  server.registerTool(
+    "amazon_now_use_address",
+    {
+      description:
+        "Deliver to a saved address, by label, id, or part of the address text. Only serviceable addresses. Prices and stock can change with the address, so re-check the cart and bill.",
+      inputSchema: { which: z.string() },
+    },
+    tool(({ which }: { which: string }) => now.useAddress(which)),
   );
   server.registerTool(
     "amazon_now_search",

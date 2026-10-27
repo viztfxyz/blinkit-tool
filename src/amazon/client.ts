@@ -2,12 +2,13 @@ import { BlinkitError } from "../core/errors.js";
 import type { Json } from "../types.js";
 import { NOW_BRAND, NOW_HOME } from "./config.js";
 import { NowLogin, type OtpChannel } from "./login.js";
-import { parseBill, parseCart, parseOrder, parseProduct } from "./parsing.js";
+import { parseAddresses, parseBill, parseCart, parseOrder, parseProduct } from "./parsing.js";
 import { type NowPayOptions, payNow } from "./pay.js";
 import { NowSession } from "./session.js";
-import type { NowBill, NowCart, NowOrder, NowPayStatus, NowProduct } from "./types.js";
+import type { NowAddress, NowBill, NowCart, NowOrder, NowPayStatus, NowProduct } from "./types.js";
 
 const ASIN = /^[A-Z0-9]{10}$/;
+const GLOW = "storeContext=amazontez&pageType=amazontez&actionSource=tez-glow";
 
 function asin(id: string): string {
   const a = String(id).trim().toUpperCase();
@@ -59,23 +60,76 @@ export class AmazonNow {
   /** Login state, delivery address and store ETA. */
   async whoami() {
     if (!this.loggedIn) return { loggedIn: false };
-    const loc = await this.session.raw(
-      "GET",
-      "/portal-migration/hz/glow/get-location-label?storeContext=amazontez&pageType=amazontez&actionSource=tez-glow",
-      { from: NOW_HOME },
-    );
-    let label: Json = {};
-    try {
-      label = JSON.parse(loc.text);
-    } catch {}
+    const selected = (await this.addresses()).find((a) => a.selected);
     return {
       loggedIn: true,
-      deliverTo: label?.customerIntent?.addressLine1
-        ? [label.customerIntent.addressLine1, label.customerIntent.city, label.customerIntent.zipCode]
-            .filter(Boolean)
-            .join(", ")
-        : (label?.deliveryShortLine ?? null),
+      deliverTo: selected ? { label: selected.label, text: selected.text, serviceable: selected.serviceable } : null,
     };
+  }
+
+  // ---------- addresses ----------
+
+  private async addressBook() {
+    this.session.requireLogin();
+    const r = await this.session.raw("POST", `/portal-migration/hz/glow/get-address-selections-view-model?${GLOW}`, {
+      json: {},
+      from: NOW_HOME,
+      headers: { "x-requested-with": "XMLHttpRequest" },
+    });
+    let vm: Json;
+    try {
+      vm = JSON.parse(r.text);
+    } catch {
+      throw new BlinkitError(`Amazon didn't return your saved addresses (HTTP ${r.status})`);
+    }
+    if (!vm?.features?.AddressList) throw new BlinkitError("Amazon didn't return your saved addresses");
+    return parseAddresses(vm.features.AddressList);
+  }
+
+  /** Saved addresses; `serviceable` says whether Amazon Now delivers there, `selected` which one is in use. */
+  async addresses(): Promise<NowAddress[]> {
+    return (await this.addressBook()).addresses;
+  }
+
+  /** Deliver to a saved address, picked by label, id, or part of the address text. */
+  async useAddress(which: string): Promise<NowAddress> {
+    const { addresses, csrf } = await this.addressBook();
+    const q = which.trim().toLowerCase();
+    if (!q) throw new BlinkitError("say which address: a label, an id, or part of the address");
+    const exact = addresses.filter((a) => a.id.toLowerCase() === q || a.label?.toLowerCase() === q);
+    const loose = addresses.filter((a) => `${a.label ?? ""} ${a.name ?? ""} ${a.text}`.toLowerCase().includes(q));
+    const matches = exact.length ? exact : loose;
+    if (!matches.length) {
+      throw new BlinkitError(`no saved address matches "${which}"; see \`blinkit amazon address\``);
+    }
+    if (matches.length > 1) {
+      throw new BlinkitError(
+        `"${which}" matches ${matches.length} addresses (${matches.map((a) => a.label ?? a.id.slice(0, 8)).join(", ")}); be more specific`,
+      );
+    }
+    const target = matches[0];
+    if (!target.serviceable) throw new BlinkitError(`Amazon Now doesn't deliver to "${target.label ?? target.text}"`);
+    if (target.selected) return target;
+    if (!csrf) throw new BlinkitError("Amazon didn't provide the token needed to change the address; try again");
+    // The web app's setSelectedLocationInGlow: no tez-brand/group headers, CSRF from the address list.
+    await this.session.raw("POST", "/portal-migration/hz/glow/address-change?actionSource=tez-glow", {
+      json: {
+        addressId: target.id,
+        actionSource: "tez-glow",
+        pageType: "amazontez",
+        storeContext: "amazontez",
+        locationType: "ACCOUNT_ADDRESS",
+      },
+      from: NOW_HOME,
+      headers: { "anti-csrftoken-a2z": csrf, "x-requested-with": "XMLHttpRequest" },
+    });
+    this.session.resetStore();
+    // Trust the address list, not the reply: Amazon has answered address changes with an empty 200.
+    const now = (await this.addresses()).find((a) => a.selected);
+    if (now?.id !== target.id) {
+      throw new BlinkitError(`Amazon didn't switch to "${target.label ?? target.text}"; try again`);
+    }
+    return now;
   }
 
   // ---------- catalog ----------

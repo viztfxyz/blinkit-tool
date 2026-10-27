@@ -61,6 +61,21 @@ export interface NowBill {
   balanceApplied: number;
 }
 
+/** A saved address on the Amazon account. */
+export interface NowAddress {
+  id: string;
+  label: string | null;
+  name: string | null;
+  text: string;
+  pincode: string | null;
+  /** Amazon Now delivers here (Amazon's `isEnabled`; unserved addresses show "Not served"). */
+  serviceable: boolean;
+  /** The address Amazon Now is currently shopping for. */
+  selected: boolean;
+  /** The account's default address on amazon.in (not necessarily served by Amazon Now). */
+  isDefault: boolean;
+}
+
 export interface NowOrder {
   orderId: string;
   /** What Amazon shows on the order, e.g. "Order cancelled", "Arriving in 9 mins". */

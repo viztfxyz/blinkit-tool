@@ -23,14 +23,14 @@ import { decodeQrPng } from "../pay/qr.js";
 import { type Handoff, type PayStage, readPayStatus, writePayStatus } from "../pay/status.js";
 import { type NowBrowser, openBrowser, snapshot } from "./browser.js";
 import { AMAZON_BASE, amazonPaths, NOW_CART } from "./config.js";
-import { type NowPayOutcome, payOutcome, upiAmount } from "./parsing.js";
+import { type NowPayOutcome, payOutcome, upiAmount, upiExpiry } from "./parsing.js";
 import type { NowSession } from "./session.js";
 import type { NowBill, NowCart, NowPayStatus } from "./types.js";
 
 export interface NowPayOptions {
   /** Must equal the bill total from `checkout`, or nothing happens. */
   confirmAmount: number;
-  /** Seconds to wait for the payment (Amazon's QR itself lasts about 10 minutes). */
+  /** Seconds to wait for the payment; the wait also ends when the QR expires (read from the QR itself). */
   timeoutSec?: number;
   /** Stop on the payment page with Scan & Pay UPI selected, before placing the order. */
   dryRun?: boolean;
@@ -275,12 +275,17 @@ export async function payNow(deps: NowPayDeps, opts: NowPayOptions): Promise<Now
     throw new BlinkitError(error);
   }
   const timeoutMs = (opts.timeoutSec ?? 600) * 1000;
-  const deadline = Math.min(Date.now() + timeoutMs, (qr.expiresAt ?? Number.POSITIVE_INFINITY) + 30_000);
+  // The QR's own QRexpire is what the payer's UPI app enforces; the page countdown is the fallback.
+  const expiries = [upiIntent ? upiExpiry(upiIntent) : null, qr.expiresAt ?? null].filter(
+    (t): t is number => t != null,
+  );
+  const expiresAt = expiries.length ? Math.min(...expiries) : undefined;
+  const deadline = Math.min(Date.now() + timeoutMs, (expiresAt ?? Number.POSITIVE_INFINITY) + 30_000);
   const link: HandoffResult = await handOffOrder(mode, {
     order: nowQrbatonOrder(bill, cart, opts.agent),
     upiIntent,
     qrPng: qr.png,
-    ttlSec: Math.max(60, Math.round((Math.min(deadline, qr.expiresAt ?? deadline) - Date.now()) / 1000)),
+    ttlSec: Math.max(60, Math.round((Math.min(deadline, expiresAt ?? deadline) - Date.now()) / 1000)),
     qrPath: amazonPaths.qr,
   });
   const ready = {
@@ -290,13 +295,14 @@ export async function payNow(deps: NowPayDeps, opts: NowPayOptions): Promise<Now
     qrImage: link.qrImage,
     ...(upiIntent ? { upiIntent } : {}),
     ...(link.payLink ? { payLink: link.payLink, sessionId: link.sessionId } : {}),
-    ...(qr.expiresAt ? { qrExpiresAt: qr.expiresAt } : {}),
+    ...(expiresAt ? { qrExpiresAt: expiresAt } : {}),
     ...(link.warning || !upiIntent
       ? { warning: link.warning ?? "couldn't read the QR's UPI link; the amount inside it wasn't checked" }
       : {}),
   };
   status({ ...ready, stage: "qr_ready" });
   announce(link, amount, ready.warning, opts, log);
+  if (expiresAt) log(`QR valid until ${new Date(expiresAt).toLocaleTimeString()}.`);
 
   const finish = async (stage: PayStage, extra: Partial<NowPayStatus> = {}) => {
     const s = qrbatonStatusFor(stage);

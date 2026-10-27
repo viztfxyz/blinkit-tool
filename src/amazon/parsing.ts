@@ -1,6 +1,6 @@
 import type { Json } from "../types.js";
 import { AMAZON_BASE } from "./config.js";
-import type { NowBill, NowBillLine, NowCart, NowCartLine, NowOrder, NowProduct } from "./types.js";
+import type { NowAddress, NowBill, NowBillLine, NowCart, NowCartLine, NowOrder, NowProduct } from "./types.js";
 
 /**
  * Amazon money comes as `{amount}`, `{currency: {amount}}` or `{priceToPay: {currency: {amount}}}`
@@ -120,11 +120,48 @@ export function parseOrder(o: Json): NowOrder {
   };
 }
 
+/**
+ * The glow address picker's `AddressList` feature (a JSON string inside get-address-selections-view-model):
+ * saved addresses, which one is selected, and the CSRF token address-change requires.
+ */
+export function parseAddresses(addressList: Json): { addresses: NowAddress[]; csrf: string | null } {
+  const a = typeof addressList === "string" ? JSON.parse(addressList) : addressList;
+  const sel = a?.selectedDestination;
+  const selectedId = sel?.destinationType === "ADDRESS_ID" ? sel.destinationValue : null;
+  const addresses = (a?.addressSection?.addressList ?? []).map(
+    (x: Json): NowAddress => ({
+      id: x.addressId,
+      label: x.label ?? null,
+      name: x.name ?? null,
+      text: [x.addressLine1, x.addressLine2, x.city, x.state, x.postalCode].filter(Boolean).join(", "),
+      pincode: x.postalCode ?? null,
+      serviceable: x.isEnabled === true,
+      selected: x.addressId === selectedId,
+      isDefault: x.isDefault === true,
+    }),
+  );
+  return { addresses, csrf: typeof a?.csrfToken === "string" ? a.csrfToken : null };
+}
+
 /** The amount (rupees) inside a upi://pay intent, or null when it has none. */
 export function upiAmount(intent: string): number | null {
   const am = new URL(intent.replace(/^upi:\/\//i, "https://upi/")).searchParams.get("am");
   const n = am == null ? Number.NaN : Number(am);
   return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * When the QR itself stops accepting payment, from its `QRexpire` parameter (ISO time with up to
+ * 9 fraction digits, e.g. 2026-10-27T12:53:46.04695114+05:30). This is what the payer's UPI app
+ * enforces, so it wins over the payment page's countdown. Epoch ms, or null when absent.
+ */
+export function upiExpiry(intent: string): number | null {
+  // Not URLSearchParams: it would turn the raw "+" of "+05:30" into a space.
+  const m = intent.match(/[?&]QRexpire=([^&]+)/);
+  if (!m) return null;
+  const raw = decodeURIComponent(m[1]);
+  const t = Date.parse(raw.replace(/(\.\d{3})\d+/, "$1"));
+  return Number.isFinite(t) ? t : null;
 }
 
 export type NowPayOutcome = "paid" | "failed" | "timeout";

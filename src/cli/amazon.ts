@@ -2,7 +2,7 @@ import { createInterface } from "node:readline/promises";
 import { type Command, InvalidArgumentError, Option } from "commander";
 import { AmazonNow } from "../amazon/client.js";
 import { OTP_CHANNELS, type OtpChannel } from "../amazon/login.js";
-import type { NowBill, NowCart, NowOrder, NowProduct } from "../amazon/types.js";
+import type { NowAddress, NowBill, NowCart, NowOrder, NowProduct } from "../amazon/types.js";
 import { HANDOFFS, type Handoff } from "../pay/status.js";
 import { json } from "./format.js";
 
@@ -72,6 +72,21 @@ function orders(list: NowOrder[]): void {
   }
 }
 
+function addresses(list: NowAddress[]): void {
+  if (!list.length) {
+    console.log("No saved addresses on this Amazon account.");
+    return;
+  }
+  for (const a of list) {
+    const mark = a.selected ? "*" : " ";
+    const tags = [a.serviceable ? null : "not served by Amazon Now", a.isDefault ? "Amazon default" : null]
+      .filter(Boolean)
+      .join(", ");
+    console.log(`${mark} [${a.label ?? "—"}] ${a.text}${tags ? `  (${tags})` : ""}`);
+    console.log(`    id=${a.id}`);
+  }
+}
+
 const printCart = (o: { json?: boolean }) => (c: NowCart) => (o.json ? json(c) : cart(c));
 
 export function registerAmazon(program: Command): void {
@@ -109,6 +124,22 @@ export function registerAmazon(program: Command): void {
     .command("whoami")
     .description("login and delivery address")
     .action(async () => json(await now().whoami()));
+
+  const address = amazon.command("address").description("saved Amazon addresses; * marks the one in use");
+  address
+    .command("list", { isDefault: true })
+    .option("--json", "print JSON")
+    .action(async (o) => {
+      const list = await now().addresses();
+      o.json ? json(list) : addresses(list);
+    });
+  address
+    .command("use <which>")
+    .description("deliver to a saved address: label, id, or part of the address")
+    .action(async (which) => {
+      const a = await now().useAddress(which);
+      console.log(`Delivering to [${a.label ?? "—"}] ${a.text}`);
+    });
 
   amazon
     .command("search <query>")
