@@ -1,6 +1,5 @@
 import { type CuimpHttp, createCuimpHttp } from "cuimp";
-import { BASE, IMPERSONATE_VERSIONS } from "./config.js";
-import { BlinkitError } from "./errors.js";
+import { HandcartError } from "./errors.js";
 
 export type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
@@ -15,18 +14,29 @@ export interface RequestOptions {
   form?: Record<string, string>;
 }
 
+export interface TransportOptions {
+  /** Origin that relative paths are resolved against, and whose homepage is warmed. */
+  base: string;
+  /** Chrome builds to impersonate, tried in order. */
+  versions: readonly string[];
+  /** Homepage a fresh `chromeClient` probes to pick up that site's cookies. */
+  probe: string;
+}
+
 const quiet = { info() {}, warn() {}, error() {}, debug() {} };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const isChallenge = (r: HttpResponse) => r.status === 403 && /<html|<!doctype/i.test(r.text.slice(0, 300));
 
 /**
- * HTTP with a real-Chrome TLS/header fingerprint (curl-impersonate via cuimp), which Cloudflare in
- * front of blinkit.com requires. Before any API call it loads the homepage on a Chrome build that
+ * HTTP with a real-Chrome TLS/header fingerprint (curl-impersonate via cuimp), which the Cloudflare in
+ * front of a store's site requires. Before any API call it loads the homepage on a Chrome build that
  * passes and keeps that client's cookies; on a Cloudflare challenge it re-warms on the next build.
  */
 export class Transport {
   private client?: CuimpHttp;
   private versionIdx = 0;
+
+  constructor(private readonly opts: TransportOptions) {}
 
   private async send(c: CuimpHttp, method: Method, url: string, headers: Record<string, string>, data?: string) {
     const r = await c.request<string>({ url, method, headers, data, timeout: 25000, extraCurlArgs: ["--compressed"] });
@@ -36,23 +46,24 @@ export class Transport {
   /** Get a client whose cookie jar holds a passed homepage visit. */
   private async warm(): Promise<CuimpHttp> {
     if (this.client) return this.client;
-    for (let i = 0; i < IMPERSONATE_VERSIONS.length; i++) {
-      const version = IMPERSONATE_VERSIONS[this.versionIdx % IMPERSONATE_VERSIONS.length];
+    const { base, versions } = this.opts;
+    for (let i = 0; i < versions.length; i++) {
+      const version = versions[this.versionIdx % versions.length];
       const c = createCuimpHttp({ descriptor: { browser: "chrome", version }, cookieJar: true, logger: quiet });
-      const home = await this.send(c, "GET", `${BASE}/`, {}).catch(() => ({ status: 0, text: "" }));
+      const home = await this.send(c, "GET", `${base}/`, {}).catch(() => ({ status: 0, text: "" }));
       if (home.status === 200) {
         this.client = c;
         return c;
       }
       this.versionIdx++;
     }
-    throw new BlinkitError(
-      "blinkit.com is refusing automated requests right now (Cloudflare); try again in a few minutes",
+    throw new HandcartError(
+      `${new URL(base).host} is refusing automated requests right now (Cloudflare); try again in a few minutes`,
     );
   }
 
   async request(method: Method, pathOrUrl: string, opts: RequestOptions = {}): Promise<HttpResponse> {
-    const url = pathOrUrl.startsWith("http") ? pathOrUrl : BASE + pathOrUrl;
+    const url = pathOrUrl.startsWith("http") ? pathOrUrl : this.opts.base + pathOrUrl;
     const headers: Record<string, string> = { ...opts.headers };
     let data: string | undefined;
     if (opts.json !== undefined) {
@@ -64,7 +75,7 @@ export class Transport {
     }
     let res: HttpResponse = { status: 0, text: "" };
     for (let attempt = 0; attempt < 4; attempt++) {
-      // Absolute URLs (e.g. zomato.com) still use a Chrome-TLS client; warm blinkit.com once for CF cookies.
+      // Absolute URLs (e.g. zomato.com) still use a Chrome-TLS client; warm the store's site once for CF cookies.
       res = await this.send(await this.warm(), method, url, headers, data);
       if (isChallenge(res)) {
         this.client = undefined; // re-warm on the next Chrome build
@@ -82,15 +93,16 @@ export class Transport {
 
   /** Fresh Chrome-TLS client with its own cookie jar (needed for zpaykit laravel_session). */
   async chromeClient(): Promise<CuimpHttp> {
-    for (let i = 0; i < IMPERSONATE_VERSIONS.length; i++) {
-      const version = IMPERSONATE_VERSIONS[(this.versionIdx + i) % IMPERSONATE_VERSIONS.length];
+    const { versions, probe } = this.opts;
+    for (let i = 0; i < versions.length; i++) {
+      const version = versions[(this.versionIdx + i) % versions.length];
       const c = createCuimpHttp({ descriptor: { browser: "chrome", version }, cookieJar: true, logger: quiet });
-      const probe = await this.send(c, "GET", "https://www.zomato.com/", {}).catch(() => ({ status: 0, text: "" }));
-      if (probe.status > 0 && probe.status < 500) return c;
+      const r = await this.send(c, "GET", probe, {}).catch(() => ({ status: 0, text: "" }));
+      if (r.status > 0 && r.status < 500) return c;
     }
-    // Zomato may 403 the bare homepage; still return a Chrome client — zpaykit often works anyway.
+    // The probe may 403 its bare homepage; still return a Chrome client — zpaykit often works anyway.
     return createCuimpHttp({
-      descriptor: { browser: "chrome", version: IMPERSONATE_VERSIONS[this.versionIdx % IMPERSONATE_VERSIONS.length] },
+      descriptor: { browser: "chrome", version: versions[this.versionIdx % versions.length] },
       cookieJar: true,
       logger: quiet,
     });

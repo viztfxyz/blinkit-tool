@@ -6,13 +6,14 @@
  */
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { BASE, paths, QRBATON_URL } from "../core/config.js";
-import type { Cart, SelectedAddress } from "../types.js";
+import { QRBATON_URL } from "../core/config.js";
+import { BASE, paths } from "../platforms/blinkit/config.js";
+import type { BlinkitCart, SelectedAddress } from "../platforms/blinkit/types.js";
 import { writeQr } from "./qr.js";
 import type { Handoff, PayStage } from "./status.js";
 
 export interface HandoffInput {
-  cart: Cart;
+  cart: BlinkitCart;
   address?: SelectedAddress;
   amount: number;
   orderId?: number;
@@ -110,10 +111,30 @@ export function payPageTtlSec(
   return Number.isFinite(ttl) ? Math.min(86400, Math.max(60, Math.round(ttl))) : undefined;
 }
 
+/** Write Blinkit's QR and, for "qrbaton", create the pay page. */
+export function handOff(mode: Handoff, input: HandoffInput): Promise<HandoffResult> {
+  return handOffOrder(mode, { ...input, order: qrbatonOrder(input), ttlSec: payPageTtlSec(input) });
+}
+
+/** What any store needs to hand a UPI payment over: the QR and an order summary for the pay page. */
+export interface OrderHandoffInput {
+  order: QrbatonOrder;
+  /** The upi://pay intent, when known. */
+  upiIntent?: string | null;
+  /** The captured QR image, used when the intent could not be read. */
+  qrPng?: Buffer;
+  /** Seconds the pay page accepts payment; already capped to the QR's own expiry. */
+  ttlSec?: number;
+  /** When the UPI QR stops accepting payment (epoch ms), if known. */
+  qrExpiresAt?: number;
+  /** Where the QR PNG is written (default: Blinkit's `upi_qr.png`). */
+  qrPath?: string;
+}
+
 /** Write the QR and, for "qrbaton", create the pay page. Falls back to the bare QR if qrbaton fails. */
-export async function handOff(mode: Handoff, input: HandoffInput): Promise<HandoffResult> {
+export async function handOffOrder(mode: Handoff, input: OrderHandoffInput): Promise<HandoffResult> {
   const upiIntent = input.upiIntent ?? undefined;
-  const qrImage = await writeQr(paths.qr, { upiIntent, png: input.qrPng });
+  const qrImage = await writeQr(input.qrPath ?? paths.qr, { upiIntent, png: input.qrPng });
   const qrOnly: HandoffResult = {
     handoff: "qr",
     qrImage,
@@ -121,15 +142,15 @@ export async function handOff(mode: Handoff, input: HandoffInput): Promise<Hando
     ...(input.qrExpiresAt ? { qrExpiresAt: input.qrExpiresAt } : {}),
   };
   if (mode === "qr") return qrOnly;
-  const ttlSec = payPageTtlSec(input);
+  const ttlSec = input.ttlSec;
   try {
     const r = await fetch(`${QRBATON_URL}/api/sessions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         ...(upiIntent ? { upi: upiIntent } : { qr: readFileSync(qrImage).toString("base64") }),
-        order: qrbatonOrder(input),
-        ...(ttlSec ? { ttlSec } : {}),
+        order: input.order,
+        ...(ttlSec ? { ttlSec: Math.min(86400, Math.max(60, Math.round(ttlSec))) } : {}),
       }),
       signal: AbortSignal.timeout(15_000),
     });

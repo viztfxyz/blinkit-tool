@@ -1,6 +1,7 @@
-import { BASE, CHARGE_NAMES, SORTS, type Sort } from "../core/config.js";
-import { BlinkitError } from "../core/errors.js";
-import type { Address, Cart, Filters, Json, Pricing, Product } from "../types.js";
+import { HandcartError } from "../../core/errors.js";
+import { SORTS, type Sort } from "../../core/types.js";
+import { BASE, CHARGE_NAMES } from "./config.js";
+import type { BlinkitAddress, BlinkitCart, BlinkitProduct, Filters, Json, Pricing } from "./types.js";
 
 /** Depth-first search for the first object-valued `key`. */
 export function findKey(o: Json, key: string): Json | undefined {
@@ -38,8 +39,8 @@ export function slugify(name: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-/** Normalise a Blinkit `cart_item` (embedded in product cards) into a Product. */
-export function fromCartItem(ci: Json, card: Json = {}): Product {
+/** Normalise a Blinkit `cart_item` (embedded in product cards) into a BlinkitProduct. */
+export function fromCartItem(ci: Json, card: Json = {}): BlinkitProduct {
   const price = ci.price ?? 0;
   const mrp = ci.mrp ?? price;
   const productId = Number(ci.product_id);
@@ -62,7 +63,7 @@ export function fromCartItem(ci: Json, card: Json = {}): Product {
 }
 
 /** Parse a product card snippet's data; null for non-product snippets. */
-export function parseCard(d: Json): Product | null {
+export function parseCard(d: Json): BlinkitProduct | null {
   const ci = d?.atc_action?.add_to_cart?.cart_item ?? findKey(d, "cart_item");
   if (!ci || ci.product_id == null) return null;
   const p = fromCartItem(ci, d);
@@ -70,7 +71,7 @@ export function parseCard(d: Json): Product | null {
   return p;
 }
 
-export function parseCart(data: Json, pricing: Pricing): Cart {
+export function parseCart(data: Json, pricing: Pricing): BlinkitCart {
   const cd = data?.cart_data ?? {};
   const b = cd.bill_details ?? {};
   const chargesBreakdown: Record<string, number> = {};
@@ -113,7 +114,7 @@ export function parseCart(data: Json, pricing: Pricing): Cart {
   };
 }
 
-export function parseAddress(a: Json): Address {
+export function parseAddress(a: Json): BlinkitAddress {
   const text = a.display_address || [a.line1, a.line2, a.landmark, a.city].filter(Boolean).map(String).join(", ");
   return {
     id: a.id,
@@ -128,13 +129,18 @@ export function parseAddress(a: Json): Address {
 
 /** How many results to fetch before filtering/sorting, so the top N aren't just page one. */
 export function scanSize(limit: number, sort: Sort, filters: Filters): number {
-  if (!SORTS.includes(sort)) throw new BlinkitError(`sort must be one of ${SORTS.join(", ")}`);
+  if (!SORTS.includes(sort)) throw new HandcartError(`sort must be one of ${SORTS.join(", ")}`);
   const filtering = Object.values(filters).some((v) => v !== undefined && v !== false && v !== 0 && v !== "");
   return sort === "relevance" && !filtering ? limit : Math.max(limit * 3, 60);
 }
 
 /** Apply filters and sort. Sorting keeps direct matches ahead of `related` padding. */
-export function refine(items: Product[], limit: number, sort: Sort = "relevance", f: Filters = {}): Product[] {
+export function refine(
+  items: BlinkitProduct[],
+  limit: number,
+  sort: Sort = "relevance",
+  f: Filters = {},
+): BlinkitProduct[] {
   const out = items.filter(
     (p) =>
       !(
@@ -145,7 +151,7 @@ export function refine(items: Product[], limit: number, sort: Sort = "relevance"
         p.discountPct < (f.minDiscount ?? 0)
       ),
   );
-  const key: Record<string, (p: Product) => number> = {
+  const key: Record<string, (p: BlinkitProduct) => number> = {
     price: (p) => p.price,
     price_desc: (p) => -p.price,
     discount: (p) => -p.discountPct,

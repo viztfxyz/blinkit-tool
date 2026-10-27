@@ -1,11 +1,11 @@
-import { Core } from "./core/session.js";
-import { Account } from "./services/account.js";
-import { CartService } from "./services/cart.js";
-import { Catalog } from "./services/catalog.js";
+import { Account } from "./account.js";
+import { CartService } from "./cart.js";
+import { Catalog } from "./catalog.js";
+import { Core } from "./session.js";
 
 /**
  * Unofficial Blinkit client. Login, delivery address and cart persist to the session file
- * (`~/.config/blinkit-tool/session.json`, or `$BLINKIT_SESSION`).
+ * (`~/.config/handcart/session.json`, or `$BLINKIT_SESSION`).
  *
  * ```ts
  * const bk = new Blinkit();

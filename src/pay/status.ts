@@ -1,5 +1,5 @@
-import { paths } from "../core/config.js";
 import { readJson, writeJson } from "../core/storage.js";
+import { paths } from "../platforms/blinkit/config.js";
 
 export type PayStage =
   | "starting"
@@ -42,10 +42,12 @@ export interface PayStatus {
   orderId?: number;
 }
 
-export function writePayStatus(s: Omit<PayStatus, "ts">): PayStatus {
-  const status = { ...s, ts: Date.now() };
-  writeJson(paths.payStatus, status);
+/** `file` defaults to Blinkit's status file; every other platform keeps its own so the two never mix. */
+export function writePayStatus<T extends PayStatus>(s: Omit<T, "ts">, file = paths.payStatus): T {
+  const status = { ...s, ts: Date.now() } as T;
+  writeJson(file, status);
   return status;
 }
 
-export const readPayStatus = (): PayStatus => readJson<PayStatus>(paths.payStatus) ?? { stage: "starting", ts: 0 };
+export const readPayStatus = <T extends PayStatus = PayStatus>(file = paths.payStatus): T =>
+  readJson<T>(file) ?? ({ stage: "starting", ts: 0 } as T);

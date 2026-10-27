@@ -1,6 +1,6 @@
-import type { Blinkit } from "../client.js";
-import { BlinkitError } from "../core/errors.js";
-import type { Cart } from "../types.js";
+import { HandcartError } from "../core/errors.js";
+import type { Blinkit } from "../platforms/blinkit/client.js";
+import type { BlinkitCart } from "../platforms/blinkit/types.js";
 import { type HandoffResult, handOff, openUrl, qrbatonStatusFor, reportStatus } from "./handoff.js";
 import { type Handoff, type PayStage, type PayStatus, writePayStatus } from "./status.js";
 
@@ -24,14 +24,14 @@ export interface PayOptions {
 const paise = (n: number) => Math.round(n * 100);
 
 /** Checkout, and refuse unless the payable total is exactly what the user confirmed. */
-export async function confirmedCheckout(bk: Blinkit, confirmAmount: number): Promise<Cart> {
-  if (!bk.loggedIn) throw new BlinkitError("pay needs login (`blinkit login <phone>`)");
+export async function confirmedCheckout(bk: Blinkit, confirmAmount: number): Promise<BlinkitCart> {
+  if (!bk.loggedIn) throw new HandcartError("pay needs login (`handcart blinkit login <phone>`)");
   if (!bk.state.address)
-    throw new BlinkitError("choose a saved delivery address first (`blinkit address use <label>`)");
+    throw new HandcartError("choose a saved delivery address first (`handcart blinkit address use <label>`)");
   const cart = await bk.cart.checkout();
   const toPay = cart.bill.toPay;
   if (!Number.isFinite(confirmAmount) || paise(confirmAmount) !== paise(toPay)) {
-    throw new BlinkitError(`amount to pay is ₹${toPay}, not ₹${confirmAmount}; confirm ₹${toPay} to proceed`);
+    throw new HandcartError(`amount to pay is ₹${toPay}, not ₹${confirmAmount}; confirm ₹${toPay} to proceed`);
   }
   return cart;
 }
@@ -65,7 +65,7 @@ export class PayRun {
   }
 
   async ready(input: {
-    cart: Cart;
+    cart: BlinkitCart;
     upiIntent?: string | null;
     qrPng?: Buffer;
     orderId?: number;

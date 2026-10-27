@@ -1,17 +1,17 @@
-// biome-ignore lint/suspicious/noExplicitAny: Blinkit's payloads are large, loosely-typed layout trees
-export type Json = any;
+/** Blinkit's own shapes. Product ids are numeric here; the descriptor stringifies them at the boundary. */
+import type {
+  Category,
+  CategoryGroup,
+  CategoryMatch,
+  Coords,
+  Filters,
+  Json,
+  Location,
+  Subcategory,
+} from "../../core/types.js";
 
-export interface Coords {
-  lat: number;
-  lon: number;
-}
-
-export interface Location extends Coords {
-  pincode?: string;
-  address?: string;
-  city?: string;
-  serviceable?: boolean;
-}
+/** Re-exported so the rest of this folder has one place to look for its types. */
+export type { Category, CategoryGroup, CategoryMatch, Coords, Filters, Json, Location, Subcategory };
 
 export interface SelectedAddress extends Coords {
   id: number;
@@ -19,7 +19,7 @@ export interface SelectedAddress extends Coords {
   text: string;
 }
 
-export interface Product {
+export interface BlinkitProduct {
   productId: number;
   name: string;
   brand: string | null;
@@ -38,13 +38,13 @@ export interface Product {
   subcategory?: string;
 }
 
-export interface ProductDetails extends Partial<Product> {
+export interface BlinkitProductDetails extends Partial<BlinkitProduct> {
   productId: number;
   breadcrumbs?: string[];
   attributes: Record<string, string>;
 }
 
-export interface CartLine {
+export interface BlinkitCartLine {
   productId: number;
   name: string;
   brand: string | null;
@@ -58,7 +58,7 @@ export interface CartLine {
   image: string | null;
 }
 
-export interface Bill {
+export interface BlinkitBill {
   itemsMrp: number;
   itemsTotal: number;
   productDiscount: number;
@@ -79,53 +79,23 @@ export interface LineOutcome {
   granted?: number;
 }
 
-export interface Cart {
+export interface BlinkitCart {
   cartId: number | null;
   pricing: Pricing;
-  items: CartLine[];
+  items: BlinkitCartLine[];
   unavailableProducts: Json[];
-  bill: Bill;
+  bill: BlinkitBill;
   delivery: { type: string; slot: string; date: string }[];
   outcomes?: LineOutcome[];
   checkout?: { cartId: number; state: string | null; nextStep: string };
 }
 
-export interface Address extends Partial<Coords> {
+export interface BlinkitAddress extends Partial<Coords> {
   id: number;
   label: string | null;
   name: string | null;
   text: string;
   serviceable?: boolean;
-}
-
-export interface Subcategory {
-  id: number;
-  name: string;
-  l1CatIds: number[];
-}
-
-export interface Category {
-  id: number;
-  name: string;
-  subcategories: Subcategory[];
-}
-
-export interface CategoryGroup {
-  group: string;
-  categories: Category[];
-}
-
-export type CategoryMatch =
-  | { type: "group"; id: string; name: string; group: string; categories: { id: number; name: string }[] }
-  | ({ type: "category"; group: string } & Category)
-  | ({ type: "subcategory"; group: string; category: string } & Subcategory);
-
-export interface Filters {
-  maxPrice?: number;
-  minPrice?: number;
-  brand?: string;
-  minDiscount?: number;
-  inStock?: boolean;
 }
 
 export interface SessionState {

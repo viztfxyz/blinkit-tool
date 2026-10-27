@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { parseCard, refine } from "../src/services/parsing.js";
-import type { Product } from "../src/types.js";
+import { parseCard, refine } from "../src/platforms/blinkit/parsing.js";
+import type { BlinkitProduct } from "../src/platforms/blinkit/types.js";
 
 const card = (over: Record<string, unknown> = {}, inventory = 5) => ({
   product_state: "available",
@@ -42,7 +42,16 @@ describe("parseCard stock", () => {
 
 describe("refine", () => {
   const p = (productId: number, price: number, inStock = true, related = false) =>
-    ({ productId, price, mrp: price, discountPct: 0, inStock, related, name: `p${productId}`, brand: null }) as Product;
+    ({
+      productId,
+      price,
+      mrp: price,
+      discountPct: 0,
+      inStock,
+      related,
+      name: `p${productId}`,
+      brand: null,
+    }) as BlinkitProduct;
 
   it("drops sold-out items only when inStock is asked for", () => {
     const items = [p(1, 10), p(2, 20, false)];
