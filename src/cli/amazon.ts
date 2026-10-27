@@ -89,6 +89,12 @@ function addresses(list: NowAddress[]): void {
 
 const printCart = (o: { json?: boolean }) => (c: NowCart) => (o.json ? json(c) : cart(c));
 
+/** "OTP sent by WhatsApp to ******1234.": the channel Amazon's page says it actually used. */
+export function otpSentLine(r: { channel: OtpChannel | "unknown"; to: string | null }): string {
+  const name = { whatsapp: "WhatsApp", sms: "SMS", unknown: "" }[r.channel];
+  return `OTP sent${name ? ` by ${name}` : ""} to ${r.to}.`;
+}
+
 export function registerAmazon(program: Command): void {
   const amazon = program
     .command("amazon")
@@ -100,13 +106,7 @@ export function registerAmazon(program: Command): void {
     .addOption(new Option("--via <channel>", "where Amazon sends the OTP").choices(OTP_CHANNELS).default("sms"))
     .action(async (phone, o) => {
       const r = await now().requestOtp(phone, o.via as OtpChannel);
-      const name = { whatsapp: "WhatsApp", sms: "SMS", unknown: "" }[r.channel];
-      if (!r.otpSent) {
-        console.log(`Amazon couldn't send the OTP${name ? ` (${name})` : ""}. Try again later or use --via whatsapp`);
-        process.exitCode = 1;
-        return;
-      }
-      console.log(`OTP sent${name ? ` by ${name}` : ""} to ${r.to}.`);
+      console.log(otpSentLine(r));
       const rl = createInterface({ input: process.stdin, output: process.stdout });
       try {
         for (;;) {
