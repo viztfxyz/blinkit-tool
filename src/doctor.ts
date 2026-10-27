@@ -8,6 +8,7 @@ import type { AmazonNow } from "./amazon/client.js";
 import type { Blinkit } from "./client.js";
 import { type FoundBrowser, INSTALL_BROWSER, locateBrowser } from "./core/browser.js";
 import { BlinkitError } from "./core/errors.js";
+import { AMAZON_RELOGIN } from "./core/fixes.js";
 
 export interface Check {
   name: string;
@@ -62,8 +63,18 @@ export async function runDoctor(deps: DoctorDeps): Promise<Check[]> {
       : fail("Build", "dist/ is missing", "run `npm run build`"),
   );
 
-  const browser = (deps.locate ?? locateBrowser)();
-  if (!browser) {
+  let browser: FoundBrowser | undefined;
+  let locateError: unknown;
+  try {
+    browser = (deps.locate ?? locateBrowser)();
+  } catch (e) {
+    locateError = e; // e.g. BLINKIT_BROWSER points to a missing file
+  }
+  if (locateError) {
+    const fix = locateError instanceof BlinkitError ? locateError.fix : `run \`${INSTALL_BROWSER}\``;
+    checks.push(fail("Browser", firstLine(locateError), fix));
+    checks.push(fail("Browser launch", "skipped: no usable browser", fix));
+  } else if (!browser) {
     checks.push(fail("Browser", "no Chromium-based browser found", `run \`${INSTALL_BROWSER}\` or \`blinkit setup\``));
     checks.push(fail("Browser launch", "skipped: no browser", `run \`${INSTALL_BROWSER}\` or \`blinkit setup\``));
   } else {
@@ -104,7 +115,8 @@ export async function runDoctor(deps: DoctorDeps): Promise<Check[]> {
   try {
     who = await now.whoami();
   } catch (e) {
-    const fix = e instanceof BlinkitError ? e.fix : "run `blinkit amazon login <phone>`";
+    // The cookie is there but Amazon won't serve the account: whatever the error says, the session is stale.
+    const fix = AMAZON_RELOGIN;
     checks.push(fail("Amazon login", firstLine(e), fix));
     checks.push(fail("Amazon address", "skipped: Amazon login failed", fix));
     checks.push(fail("Amazon Now serves it", "skipped: Amazon login failed", fix));

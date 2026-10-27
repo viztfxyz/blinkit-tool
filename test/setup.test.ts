@@ -43,9 +43,38 @@ describe("browser search order", () => {
   };
 
   it("takes BLINKIT_BROWSER before anything else", () => {
-    const { sys, probed } = machine({ ...everything, env: { BLINKIT_BROWSER: "/my/chrome", PATH: "/opt/bin" } });
+    const { sys, probed } = machine({
+      ...everything,
+      files: [...everything.files, "/my/chrome"],
+      env: { BLINKIT_BROWSER: "/my/chrome", PATH: "/opt/bin" },
+    });
     expect(locateBrowser({}, sys)).toEqual({ path: "/my/chrome", source: "env", headlessOnly: false });
-    expect(probed).toEqual([]);
+    expect(probed).toEqual(["/my/chrome"]);
+  });
+
+  it("refuses a BLINKIT_BROWSER that points to a missing file, instead of searching", () => {
+    const { sys, probed } = machine({ ...everything, env: { BLINKIT_BROWSER: "/gone/chrome", PATH: "/opt/bin" } });
+    const err = (() => {
+      try {
+        locateBrowser({}, sys);
+      } catch (e) {
+        return e as BlinkitError;
+      }
+    })();
+    expect(err).toBeInstanceOf(BlinkitError);
+    expect(err?.reason).toBe("BLINKIT_BROWSER points to a missing file (/gone/chrome)");
+    expect(err?.fix).toMatch(/set BLINKIT_BROWSER to the path of your Chrome, or unset it/);
+    expect(probed).toEqual(["/gone/chrome"]);
+  });
+
+  it("finds playwright-core 1.64's Chrome for Testing on macOS", () => {
+    const cache = "/home/u/Library/Caches/ms-playwright";
+    const cft = "Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing";
+    for (const arch of ["chrome-mac-arm64", "chrome-mac-x64"]) {
+      const bin = `${cache}/chromium-1248/${arch}/${cft}`;
+      const { sys } = machine({ platform: "darwin", files: [bin], dirs: { [cache]: ["chromium-1248"] } });
+      expect(locateBrowser({ headed: true }, sys)).toMatchObject({ path: bin, source: "playwright" });
+    }
   });
 
   it("then the Playwright cache (full Chromium before the headless shell), then standard paths, then PATH", () => {
@@ -254,6 +283,31 @@ describe("doctor", () => {
     expect(result.find((c) => c.name === "Browser")?.fix).toContain("npx playwright install --only-shell chromium");
   });
 
+  it("gives ✗, never ✓, when BLINKIT_BROWSER points to a missing file", async () => {
+    const deps = {
+      ...fakes({ loggedIn: false }),
+      locate: () => locateBrowser({}, machine({ env: { BLINKIT_BROWSER: "/gone/chrome" } }).sys),
+    };
+    const lines = formatChecks(await runDoctor(deps)).split("\n");
+    expect(lines[2]).toMatch(/^✗ Browser +BLINKIT_BROWSER points to a missing file \(\/gone\/chrome\)\. Fix: set /);
+    expect(lines[3]).toMatch(/^✗ Browser launch +skipped/);
+  });
+
+  it("says to log in again when the saved Amazon session no longer works", async () => {
+    const deps = fakes({
+      loggedIn: true,
+      whoami: async () => {
+        throw new BlinkitError("Amazon didn't return your saved addresses (HTTP 200)");
+      },
+    });
+    const amazon = (await runDoctor(deps)).filter((c) => c.name.startsWith("Amazon"));
+    expect(amazon.map((c) => [c.ok, c.fix])).toEqual([
+      [false, "log in again: `blinkit amazon login <phone>`"],
+      [false, "log in again: `blinkit amazon login <phone>`"],
+      [false, "log in again: `blinkit amazon login <phone>`"],
+    ]);
+  });
+
   it("reports a browser that is found but won't start", async () => {
     const deps = {
       ...fakes({ loggedIn: false }),
@@ -280,7 +334,10 @@ describe("error fixes", () => {
 
   it("maps messages to the exact command", () => {
     expect(fixOf("Amazon session expired; run `blinkit amazon login <phone>` again")).toBe(
-      "Fix: run `blinkit amazon login <phone>`",
+      "Fix: log in again: `blinkit amazon login <phone>`",
+    );
+    expect(fixOf("Amazon didn't return your saved addresses (HTTP 200)")).toBe(
+      "Fix: log in again: `blinkit amazon login <phone>`",
     );
     expect(fixOf('Amazon Now doesn\'t deliver to "Parents"')).toBe(
       "Fix: your address isn't served by Amazon Now; run `blinkit amazon address` to choose another",

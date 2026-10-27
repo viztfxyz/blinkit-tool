@@ -4,7 +4,7 @@
  * cache, Chrome / Edge / Brave / Chromium at their standard install paths, then $PATH. The first browser
  * the search finds is remembered so later runs skip it.
  */
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { closeSync, existsSync, openSync, readdirSync, readSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { posix, win32 } from "node:path";
 import { paths } from "./config.js";
@@ -40,9 +40,21 @@ export interface BlinkitConfig {
 
 /** Skip Homebrew-style wrappers whose `exec` target is missing (e.g. chromium → Chromium.app). */
 function isRunnableBrowser(bin: string): boolean {
-  if (!existsSync(bin)) return false;
   try {
-    const head = readFileSync(bin, "utf8").slice(0, 400);
+    if (!statSync(bin).isFile()) return false;
+  } catch {
+    return false; // missing
+  }
+  try {
+    // Only the first bytes: the browser binary itself is hundreds of MB.
+    const buf = Buffer.alloc(400);
+    const fd = openSync(bin, "r");
+    let head: string;
+    try {
+      head = buf.subarray(0, readSync(fd, buf, 0, 400, 0)).toString("utf8");
+    } finally {
+      closeSync(fd);
+    }
     if (!head.startsWith("#!")) return true;
     const m = head.match(/\bexec\s+(?:'([^']+)'|"([^"]+)"|(\S+))/);
     const target = m?.[1] ?? m?.[2] ?? m?.[3];
@@ -84,16 +96,20 @@ function playwrightCandidates(sys: BrowserSystem): string[] {
   const { join } = sys.platform === "win32" ? win32 : posix;
   const root = playwrightRoot(sys);
   const bins: Record<string, string[]> = {
+    // Layouts from playwright-core 1.64's registry (Chrome for Testing builds), then older Playwright's.
     chromium: [
       "chrome-linux64/chrome",
-      "chrome-linux/chrome",
-      "chrome-mac-arm64/Chromium.app/Contents/MacOS/Chromium",
-      "chrome-mac/Chromium.app/Contents/MacOS/Chromium",
+      "chrome-linux-arm64/chrome",
+      "chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+      "chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
       "chrome-win64/chrome.exe",
+      "chrome-linux/chrome",
+      "chrome-mac/Chromium.app/Contents/MacOS/Chromium",
       "chrome-win/chrome.exe",
     ],
     chromium_headless_shell: [
       "chrome-headless-shell-linux64/chrome-headless-shell",
+      "chrome-headless-shell-linux-arm64/chrome-headless-shell",
       "chrome-linux/headless_shell",
       "chrome-headless-shell-mac-arm64/chrome-headless-shell",
       "chrome-headless-shell-mac-x64/chrome-headless-shell",
@@ -175,7 +191,8 @@ export function browserCandidates(sys: BrowserSystem): { path: string; source: B
 
 /**
  * The browser to use, or undefined. `headed`: it must be able to open a window, so the headless
- * shell doesn't count. Remembers what the search found in config.json.
+ * shell doesn't count. Remembers what the search found in config.json. Throws when BLINKIT_BROWSER
+ * names a file that isn't there: an explicit choice is never silently replaced by the search.
  */
 export function locateBrowser(
   opts: { headed?: boolean } = {},
@@ -184,7 +201,14 @@ export function locateBrowser(
   const usable = (path: string) => !(opts.headed && isHeadlessShell(path));
   const found = (path: string, source: BrowserSource) => ({ path, source, headlessOnly: isHeadlessShell(path) });
   const fromEnv = sys.env.BLINKIT_BROWSER;
-  if (fromEnv) return found(fromEnv, "env");
+  if (fromEnv) {
+    if (!sys.runnable(fromEnv)) {
+      throw new BlinkitError(`BLINKIT_BROWSER points to a missing file (${fromEnv})`, {
+        fix: "set BLINKIT_BROWSER to the path of your Chrome, or unset it to find one automatically",
+      });
+    }
+    return found(fromEnv, "env");
+  }
   const config = readJson<BlinkitConfig>(sys.configFile) ?? {};
   if (config.browser && usable(config.browser) && sys.runnable(config.browser)) return found(config.browser, "config");
   const hit = browserCandidates(sys).find((c) => usable(c.path) && sys.runnable(c.path));

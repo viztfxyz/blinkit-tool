@@ -178,7 +178,9 @@ As a library in your own project: `npm install blinkit-tool`. To hack on it, see
 
 `blinkit setup` walks through everything once: it finds (or downloads) the browser, logs in to Blinkit and Amazon
 (phone number and OTP; it tells you whether Amazon sent the code by SMS or WhatsApp), picks the delivery addresses,
-runs `doctor` and ends with "Ready". Run it again any time: finished steps are skipped.
+runs `doctor` and ends with "Ready". Run it again any time: finished steps are skipped. It only sends an OTP to a
+number you type, and only downloads after you answer `y`; without a terminal (piped or in a script) it logs in to
+nothing, downloads nothing, and just prints doctor's checks with their fixes.
 
 `blinkit doctor` prints one line per check (Node, build, browser path, browser launch, Blinkit login, Amazon login,
 Amazon address, whether Amazon Now serves it), ✓ or ✗ with the command that fixes it, and exits non-zero if anything

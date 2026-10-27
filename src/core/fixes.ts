@@ -9,6 +9,8 @@ export const INSTALL_BROWSER = "npx playwright install --only-shell chromium";
 export const INSTALL_HEADED_BROWSER = "npx playwright install chromium";
 
 const AMAZON_LOGIN = "run `blinkit amazon login <phone>`";
+/** The saved Amazon session no longer works. */
+export const AMAZON_RELOGIN = "log in again: `blinkit amazon login <phone>`";
 const BLINKIT_LOGIN = "run `blinkit login <phone>`";
 const AMAZON_ADDRESS = "run `blinkit amazon address` to see your addresses, then `blinkit amazon address use <label>`";
 const BLINKIT_ADDRESS = "run `blinkit address list`, then `blinkit address use <label>`";
@@ -34,8 +36,10 @@ export const FIX_RULES: [RegExp, string][] = [
     "turn on OTP sign-in for this account on amazon.in, then run `blinkit amazon login <phone>`",
   ],
   [/^OTP rejected:/i, "enter the newest code again, or run `blinkit amazon login <phone>` for a new one"],
+  // An expired session shows up as an expired-session reply, a page instead of JSON, or no address book.
+  [/Amazon session expired|instead of data|Amazon didn.?t return your saved addresses/i, AMAZON_RELOGIN],
   [
-    /not logged in to Amazon|Amazon session expired|no Amazon OTP is waiting|Amazon didn.?t finish the login|Amazon showed an unexpected sign-in|instead of data|^Amazon: /i,
+    /not logged in to Amazon|no Amazon OTP is waiting|Amazon didn.?t finish the login|Amazon showed an unexpected sign-in|^Amazon: /i,
     AMAZON_LOGIN,
   ],
   // Amazon address
@@ -44,7 +48,7 @@ export const FIX_RULES: [RegExp, string][] = [
     "your address isn't served by Amazon Now; run `blinkit amazon address` to choose another",
   ],
   [
-    /see `blinkit amazon address`|matches \d+ addresses|say which address|Amazon didn.?t switch|Amazon didn.?t return your saved addresses|token needed to change the address/i,
+    /see `blinkit amazon address`|matches \d+ addresses|say which address|Amazon didn.?t switch|token needed to change the address/i,
     AMAZON_ADDRESS,
   ],
   // Amazon catalog, cart and pay

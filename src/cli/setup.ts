@@ -6,9 +6,9 @@ import type { Command } from "commander";
 import type { AmazonNow } from "../amazon/client.js";
 import type { OtpChannel } from "../amazon/login.js";
 import type { Blinkit } from "../client.js";
-import { allowBrowserDownload, ensureBrowser } from "../core/browser.js";
+import { ensureBrowser } from "../core/browser.js";
 import { BlinkitError } from "../core/errors.js";
-import { allOk, formatChecks, runDoctor } from "../doctor.js";
+import { allOk, type DoctorDeps, formatChecks, runDoctor } from "../doctor.js";
 import { otpSentLine } from "./amazon.js";
 import { ask, confirm } from "./prompt.js";
 
@@ -84,15 +84,11 @@ async function amazonWorks(now: AmazonNow): Promise<boolean> {
   );
 }
 
-async function amazonLogin(now: AmazonNow, knownPhone?: string): Promise<void> {
+async function amazonLogin(now: AmazonNow): Promise<void> {
   todo("Amazon login");
   if (await amazonWorks(now)) return done("Amazon: already logged in");
-  const typed = await ask(
-    knownPhone
-      ? `Amazon mobile number [Enter for ${knownPhone}, "-" to skip]: `
-      : "Amazon mobile number (Enter to skip): ",
-  );
-  const phone = typed === "-" ? "" : typed || knownPhone;
+  // Only a number typed now: never fall back to a saved one, so no OTP goes out unasked.
+  const phone = await ask("Amazon mobile number (Enter to skip): ");
   if (!phone) return console.log("Skipped Amazon.");
   let via: OtpChannel = (await ask("Send the OTP by SMS or WhatsApp? [sms] ")).toLowerCase().startsWith("w")
     ? "whatsapp"
@@ -139,31 +135,54 @@ async function amazonAddress(now: AmazonNow): Promise<void> {
   done(`Amazon: delivering to [${used.label ?? "—"}] ${used.text}`);
 }
 
+export interface SetupDeps {
+  bk: Blinkit;
+  now: AmazonNow;
+  /** Someone at a terminal can answer. Without one, setup only checks: no OTPs, no downloads. */
+  interactive: boolean;
+  /** For tests: doctor's dependencies other than the clients. */
+  doctor?: Omit<DoctorDeps, "bk" | "now">;
+}
+
+/** The whole guided run; true when doctor ends all ✓. */
+export async function runSetup({ bk, now, interactive, doctor }: SetupDeps): Promise<boolean> {
+  todo("Browser");
+  try {
+    // The download prompt is only enabled on a terminal (see run() in main.ts); otherwise this just finds one.
+    done(`Browser: ${await ensureBrowser()}`);
+  } catch (e) {
+    warn(e);
+  }
+  if (interactive) {
+    // A failed step is reported and setup moves on; doctor at the end lists whatever is still missing.
+    for (const step of [
+      () => blinkitLogin(bk),
+      () => blinkitAddress(bk),
+      () => amazonLogin(now),
+      () => amazonAddress(now),
+    ]) {
+      await step().catch(warn);
+    }
+  } else {
+    console.log(
+      "\nstdin isn't a terminal, so setup won't log in or download anything.\n" +
+        "Fix: run `blinkit setup` in a terminal, or the Fix commands below.",
+    );
+  }
+  todo("Checking everything (blinkit doctor)");
+  const checks = await runDoctor({ ...doctor, bk, now });
+  console.log(formatChecks(checks));
+  const ready = allOk(checks);
+  console.log(ready ? "\nReady" : "\nNot ready yet: run the Fix commands above, or `blinkit setup` again.");
+  return ready;
+}
+
 export function registerSetup(program: Command, bk: () => Blinkit, now: () => AmazonNow): void {
   program
     .command("setup")
     .description("guided setup: browser, Blinkit and Amazon login, delivery address, then doctor (safe to rerun)")
     .action(async () => {
-      allowBrowserDownload(confirm); // setup is interactive even when stdin isn't a TTY
-      todo("Browser");
-      done(`Browser: ${await ensureBrowser()}`);
-      // A failed step is reported and setup moves on; doctor at the end lists whatever is still missing.
-      for (const step of [
-        () => blinkitLogin(bk()),
-        () => blinkitAddress(bk()),
-        () => amazonLogin(now(), bk().state.user?.phone),
-        () => amazonAddress(now()),
-      ]) {
-        await step().catch(warn);
-      }
-      todo("Checking everything (blinkit doctor)");
-      const checks = await runDoctor({ bk: bk(), now: now() });
-      console.log(formatChecks(checks));
-      if (allOk(checks)) {
-        console.log("\nReady");
-      } else {
-        console.log("\nNot ready yet: run the Fix commands above, or `blinkit setup` again.");
-        process.exitCode = 1;
-      }
+      const ready = await runSetup({ bk: bk(), now: now(), interactive: !!process.stdin.isTTY });
+      if (!ready) process.exitCode = 1;
     });
 }

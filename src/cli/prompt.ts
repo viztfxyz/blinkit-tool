@@ -1,14 +1,23 @@
 import { createInterface, type Interface } from "node:readline";
 
 let rl: Interface | undefined;
+let input: NodeJS.ReadableStream = process.stdin;
 const lines: string[] = [];
 const waiting: ((line: string) => void)[] = [];
 let ended = false;
 
+/** Read answers from `stream` instead of stdin (tests). */
+export function usePromptInput(stream: NodeJS.ReadableStream): void {
+  closePrompts();
+  input = stream;
+  lines.length = 0;
+  ended = false;
+}
+
 /** One shared reader that queues lines, so answers piped in ahead of their questions aren't lost. */
 function reader(): Interface {
   if (rl) return rl;
-  rl = createInterface({ input: process.stdin, terminal: false });
+  rl = createInterface({ input, terminal: false });
   rl.on("line", (line) => (waiting.length ? waiting.shift()?.(line) : lines.push(line)));
   rl.on("close", () => {
     ended = true;
@@ -26,9 +35,9 @@ export async function ask(question: string): Promise<string> {
   return (line ?? "").trim();
 }
 
-export async function confirm(question: string, byDefault = true): Promise<boolean> {
-  const a = (await ask(`${question} ${byDefault ? "[Y/n]" : "[y/N]"} `)).toLowerCase();
-  return a ? a.startsWith("y") : byDefault;
+/** Yes only for a typed yes: Enter, or input that has ended, is No. */
+export async function confirm(question: string): Promise<boolean> {
+  return (await ask(`${question} [y/N] `)).toLowerCase().startsWith("y");
 }
 
 export function closePrompts(): void {
