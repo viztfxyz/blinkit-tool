@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { AmazonNow } from "../src/amazon/client.js";
 import { type BrowserCookie, parseNetscape, readCookies, toNetscape, writeCookies } from "../src/amazon/cookies.js";
-import { otpSentVia } from "../src/amazon/login.js";
+import { otpOutcome, otpSentVia } from "../src/amazon/login.js";
 import {
   parseAddresses,
   parseBill,
@@ -413,5 +413,15 @@ describe("Amazon OTP channel", () => {
     );
     expect(otpSentVia("We sent a code to your phone via SMS. Send code via WhatsApp")).toBe("sms");
     expect(otpSentVia("Enter the code")).toBe("unknown");
+  });
+
+  it("reports when Amazon couldn't send the OTP", () => {
+    const page =
+      "Verify with SMS +91 ***-***-12 Change Enter the OTP we sent you on +91 ***-***-12. Enter OTP Resend OTP Verify or Send OTP to WhatsApp +91 ***-***-12 Sign in another way";
+    expect(otpOutcome(`We couldn't send an OTP. Please try again. ${page}`)).toEqual({
+      otpSent: false,
+      channel: "sms",
+    });
+    expect(otpOutcome(page)).toEqual({ otpSent: true, channel: "sms" });
   });
 });

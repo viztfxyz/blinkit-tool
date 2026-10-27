@@ -20,9 +20,16 @@ export function otpSentVia(text: string): OtpChannel | "unknown" {
     /(get|send|receive|resend)\s+(an?\s+)?(otp|code)\s+(on|via|by|through)\s+(whatsapp|sms|text message)(\s+instead)?/gi,
     " ",
   );
+  if (/Verify with SMS/i.test(text)) return "sms";
+  if (/Verify with WhatsApp/i.test(text)) return "whatsapp";
   if (/sent.{0,60}WhatsApp|WhatsApp.{0,40}(code|OTP)|Verify with WhatsApp/i.test(text)) return "whatsapp";
   if (/sent.{0,60}(SMS|text message|mobile number|phone|\+\d)|\bSMS\b.{0,40}(code|OTP)/i.test(text)) return "sms";
   return "unknown";
+}
+
+/** Whether the OTP screen says the code was sent, and where. */
+export function otpOutcome(text: string): { otpSent: boolean; channel: OtpChannel | "unknown" } {
+  return { otpSent: !/couldn.?t send an OTP|unable to send|try again later/i.test(text), channel: otpSentVia(text) };
 }
 
 const OTP_INPUT = "#ap_otp_code, input[name=otpCode], #cvf-input-code, input[name=code]";
@@ -75,13 +82,13 @@ export class NowLogin {
       await sleep(800);
       await clickAndSettle(page, page.locator("input#continue, input[type=submit]").first());
       await this.reachOtp(page, channel);
+      const r = otpOutcome(await pageText(page));
+      if (!r.otpSent) {
+        await b.discard();
+        return { ...r, error: "Amazon couldn't send the OTP", to: maskPhone(digits) };
+      }
       this.pending = { b, phone: digits };
-      const sentVia = otpSentVia(await pageText(page));
-      const note =
-        channel === "sms" && sentVia === "whatsapp"
-          ? "Amazon sent the code to WhatsApp; switching to SMS didn't take effect or wasn't offered."
-          : undefined;
-      return { otpSent: true as const, channel: sentVia, to: maskPhone(digits), ...(note ? { note } : {}) };
+      return { ...r, to: maskPhone(digits) };
     } catch (e) {
       await b.discard();
       throw e;
