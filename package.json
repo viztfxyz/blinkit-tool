@@ -16,13 +16,13 @@
     "model-context-protocol",
     "ai-agent"
   ],
-  "homepage": "https://github.com/viztfxyz/blinkit-tool#readme",
+  "homepage": "https://github.com/viztfxyz/handcart#readme",
   "bugs": {
-    "url": "https://github.com/viztfxyz/blinkit-tool/issues"
+    "url": "https://github.com/viztfxyz/handcart/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/viztfxyz/blinkit-tool.git"
+    "url": "git+https://github.com/viztfxyz/handcart.git"
   },
   "license": "MIT",
   "author": "Viz",

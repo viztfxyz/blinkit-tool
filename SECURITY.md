@@ -1,6 +1,6 @@
 # Security Policy
 
-blinkit-tool handles login tokens and starts real UPI payments, so security reports are taken seriously.
+handcart handles login tokens and starts real UPI payments, so security reports are taken seriously.
 
 ## Supported versions
 
@@ -9,7 +9,7 @@ Only the latest release gets fixes.
 ## Reporting a vulnerability
 
 Please **don't** open a public issue. Report it privately through
-[GitHub security advisories](https://github.com/viztfxyz/blinkit-tool/security/advisories/new) instead.
+[GitHub security advisories](https://github.com/viztfxyz/handcart/security/advisories/new) instead.
 
 Include what you found, how to reproduce it, and what an attacker could do with it. You'll get a reply within a
 week. Once it's fixed and released, you'll be credited in the advisory unless you'd rather not be.
@@ -29,7 +29,7 @@ week. Once it's fixed and released, you'll be credited in the advisory unless yo
 
 ## Keeping your account safe
 
-- Your session lives in `~/.config/blinkit-tool/session.json` (readable only by you). Treat it like a password.
-- Run `blinkit logout` on shared machines.
+- Your session lives in `~/.config/handcart/` (readable only by you). Treat it like a password.
+- Run `handcart blinkit logout` and `handcart zepto logout` on shared machines.
 - Only give the MCP server to agents you trust to spend money on your behalf, and always check the amount before
   confirming a payment.

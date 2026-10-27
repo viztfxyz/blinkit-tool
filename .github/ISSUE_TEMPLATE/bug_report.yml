@@ -6,14 +6,14 @@ body:
     attributes:
       value: |
         Thanks for reporting! **Don't paste** your `session.json`, OTPs, access tokens, pay links or full address.
-        Security issues go to a [private advisory](https://github.com/viztfxyz/blinkit-tool/security/advisories/new) instead.
+        Security issues go to a [private advisory](https://github.com/viztfxyz/handcart/security/advisories/new) instead.
   - type: textarea
     id: what
     attributes:
       label: What happened?
       description: What you ran, what you expected, and what you got instead.
       placeholder: |
-        Ran `blinkit search paneer -p 560034` and expected results, got "error: …"
+        Ran `handcart search paneer -p 560034` and expected results, got "error: …"
     validations:
       required: true
   - type: textarea
@@ -35,8 +35,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: blinkit-tool version
-      description: Output of `blinkit --version`
+      label: handcart version
+      description: Output of `handcart --version`
     validations:
       required: true
   - type: input
