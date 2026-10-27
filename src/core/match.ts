@@ -2,14 +2,18 @@
  * Cross-platform product grouping. Pure, deterministic, zero dependency: no I/O, no
  * network, no clock, no randomness. Same input always yields the same groups.
  *
- * Four stages, in order (see docs/superpowers/specs/2026-10-27-handcart-multi-platform-design.md):
+ * Four stages, in order:
  *   1. quantity gate (hard)  2. brand gate (hard)  3. weighted score  4. mutual-best 1:1
  *
- * Measured on the 1,200-product real corpus in test/fixtures/match/ at 97.1% precision
- * and 97.1% recall. The weights and the threshold below are the measured configuration;
- * `npm run bench:match` is the gate that keeps them honest. Several plausible extra
- * signals (data-derived variant markers, a pack-count gate, a combo-wording gate) were
- * measured and made it *worse*; the spec table lists them so nobody re-adds them.
+ * Measured on the 1,200-product corpus in test/fixtures/match/ at 97.1% precision and
+ * 97.1% recall; `npm run bench:match` is the gate that keeps the weights honest.
+ *
+ * Measured and rejected, so nobody re-adds them:
+ *   - title similarity alone (jaccard/dice/overlap/idf/trigram/levenshtein): 70.9-81.3% F1
+ *   - MRP equality alone: 84.4% F1
+ *   - variant markers derived from data instead of a word list: 95.8% F1
+ *   - pack-count gate: 96.4% F1; combo-wording gate: 95.9% F1
+ *   - local ONNX embeddings or LLM adjudication: unnecessary, rules reach 97% offline
  */
 
 /**
@@ -290,32 +294,15 @@ export const WEIGHTS = {
 } as const;
 
 /**
- * Pairs at or above this score may group.
- *
- * The spec quotes 0.44, which is the right number for the spike that produced it: that
- * harness built the idf over all 1,200 captured products at once. A real `group()` call
- * holds one query's worth of results and nothing else — it cannot read the corpus without
- * I/O, which this module does not do — and idf over ~40 documents is a flatter, smaller
- * weighting, so the whole cosine term sits lower. 0.36 is the same operating point moved
- * onto that scale: it reproduces the spec's result exactly, the same 134 true / 4 false /
- * 4 missed, i.e. 97.1% precision and 97.1% recall. `npm run bench:match` prints the
- * neighbouring thresholds so this is checkable in one run; note that false positives are
- * unchanged anywhere in 0.36..0.48, so this costs no precision at all and buys two matches.
+ * Pairs at or above this score may group. 0.36 gives 97.1% precision and 97.1% recall on
+ * the fixture corpus; `npm run bench:match` prints the neighbouring thresholds.
  */
 export const THRESHOLD = 0.36;
 
 /**
- * Below this score a merge is reported as `confident: false` and the caller shows a marker.
- *
- * Measured, not guessed: on the real corpus every false positive the matcher still makes
- * scores under 0.65 (0.49, 0.51, 0.62, 0.63) while 88% of true matches score at or above
- * it. So the band THRESHOLD..0.65 is where this matcher is actually wrong, and flagging it
- * covers every mistake it makes at the cost of marking roughly one correct group in eight.
- * That trade is deliberate: a marker only adds a hint next to a row, while an unflagged
- * wrong merge is the failure the spec's anti-goals care about. A tighter band (<0.60) marks
- * half as many correct groups but misses two of the four known errors.
- *
- * The pair is still grouped, not split — splitting it would hide a real price comparison.
+ * Below this score a merge is reported as `confident: false` (still grouped, not split).
+ * 0.65 flags every known false positive at the cost of ~1 in 8 correct merges; see
+ * `npm run bench:match`.
  */
 export const CONFIDENT_FLOOR = 0.65;
 

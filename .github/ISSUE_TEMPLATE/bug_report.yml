@@ -23,6 +23,17 @@ body:
       description: The full error text (run with `--json` if it helps). Remove anything personal.
       render: text
   - type: dropdown
+    id: platform
+    attributes:
+      label: Which platform?
+      options:
+        - Blinkit
+        - Zepto
+        - Both
+        - Not sure
+    validations:
+      required: true
+  - type: dropdown
     id: surface
     attributes:
       label: How were you using it?
@@ -50,4 +61,4 @@ body:
     id: area
     attributes:
       label: City
-      description: Blinkit stores differ by area, so the city helps reproduce it. Not your address.
+      description: Stores and catalogs differ by area on both platforms, so the city helps reproduce it. Not your address.

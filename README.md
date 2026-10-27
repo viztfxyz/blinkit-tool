@@ -46,6 +46,8 @@ Or run it without installing: `npx handcart search milk`.
 
 As a library: `npm install handcart`. To hack on it, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
+Coming from `blinkit-tool`? See [MIGRATING.md](MIGRATING.md).
+
 ## Platforms
 
 | Platform  | `search` | `cart` → `checkout` → `pay` | `orders` | `categories` / `browse` / `locate` |
@@ -143,8 +145,8 @@ no dependencies, no model and no network, in under a millisecond:
 4. **Mutual-best assignment**, so each product claims at most one counterpart on another platform.
 
 Measured against 1,200 real products captured from both platforms over 30 queries, hand-labelled, in
-`test/fixtures/match/`: **97.1% precision, 97.1% recall**. `npm run bench:match` reproduces it and fails
-below 97% precision or 95% recall. Every remaining mistake is marked `[uncertain match]`.
+`test/fixtures/match/`: **97.1% precision, 97.1% recall**. `npm run bench:match` reproduces it, and it
+and `npm test` fail below 97% precision or 95% recall. Every remaining mistake is marked `[uncertain match]`.
 
 ## MCP server (Claude, Cursor, Grok…)
 
@@ -227,40 +229,9 @@ Run `handcart doctor` first — it names the command that fixes each `✗`.
 - **Search doesn't show something you expected**: it may be sold out; retry with `--out-of-stock`.
 - **`pay` says the amount differs**: the bill changed (stock, charges, promo). Re-run `checkout` and confirm the new amount.
 
-## Project layout
-
-```
-src/
-  bin/                CLI and MCP entry points
-  core/               config, HTTP transport (Chrome TLS impersonation), storage, cookies,
-                      browser lookup, UPI QR parsing, shared types, cross-platform matcher
-  platforms/
-    registry.ts       the Platform contract; a new store is one entry here
-    blinkit/          client, session, catalog, cart, account, parsing
-    zepto/            client, session, parsing, request signing, pay
-  pay/                UPI QR pay: zpaykit path, browser fallback, QR decoding, handoff
-  cli/                commander commands, terminal formatting, setup, doctor
-  mcp/                MCP server, generated from the registry
-test/
-  fixtures/match/     real captured search results + hand labels for the matcher
-```
-
-Adding a platform is a client, a parser and one `register` call — the CLI and MCP surfaces are written
-once against the registry and pick it up automatically.
-
 ## Development
 
-| Script                  | Purpose                       |
-| ----------------------- | ----------------------------- |
-| `npm run dev -- <args>` | CLI from source (tsx)         |
-| `npm run mcp`           | MCP server from source        |
-| `npm test`              | Vitest                        |
-| `npm run bench:match`   | Matcher precision/recall gate |
-| `npm run typecheck`     | Type-check `src/` and `test/` |
-| `npm run build`         | Compile to `dist/`            |
-| `npm run lint`          | Biome lint + format check     |
-| `npm run format`        | Apply Biome fixes/formatting  |
-| `npm run check`         | Lint, typecheck and tests     |
+Project layout, scripts and how to run from source (`npm run dev`, `npm run mcp`) are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Contributing
 

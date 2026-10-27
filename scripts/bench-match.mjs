@@ -1,85 +1,71 @@
 #!/usr/bin/env node
 /**
- * Benchmark src/core/match.ts against the real captured corpus in test/fixtures/match/.
+ * Benchmark src/core/match.ts against the captured corpus in test/fixtures/match/.
  *
  * Run with `npm run bench:match`. Needs a Node that strips TypeScript types on import
  * (>= 22.18); otherwise run it as `npx tsx scripts/bench-match.mjs`.
  *
- * The candidate list below must be rebuilt in exactly the order the hand labels in
- * test/fixtures/match/labels.mjs were written against — queries sorted by slug, then
- * Blinkit results in file order crossed with Zepto results in file order, keeping only
- * pairs that pass the quantity and brand gates, numbered from 1. If that order ever
- * drifts, every label points at a different pair and the numbers below are fiction, so
- * the expected totals are asserted up front.
+ * corpus.json holds each query's search results per platform; labels.json lists, per
+ * query, the hand-labelled true matches as ["blinkit:<id>", "zepto:<id>"] pairs. A pair
+ * is judged within its query, since the same two products can show up under several.
+ * test/match-bench.test.ts enforces the same gate in `npm test`.
  */
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { brandKey, CONFIDENT_FLOOR, group, parseQty, qtyEq, THRESHOLD } from "../src/core/match.ts";
-import { TRUE_IDS } from "../test/fixtures/match/labels.mjs";
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const SEARCH = join(ROOT, "test/fixtures/match/search");
+const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "../test/fixtures/match");
 
-const EXPECTED_CANDIDATES = 476;
-const EXPECTED_POSITIVES = 138;
 const MIN_PRECISION = 0.97;
 const MIN_RECALL = 0.95;
 
 // ---- corpus -------------------------------------------------------------
 
-/** { [querySlug]: { [platform]: Product[] } }, each file named `<platform>__<slug>.json`. */
+/** { [query]: { [platform]: TaggedProduct[] } } */
 function loadCorpus() {
+  const { fields, queries } = JSON.parse(readFileSync(join(FIXTURES, "corpus.json"), "utf8"));
   const byQuery = {};
-  for (const file of readdirSync(SEARCH).filter((f) => f.endsWith(".json"))) {
-    const [platform, slug] = file.replace(/\.json$/, "").split("__");
-    const raw = JSON.parse(readFileSync(join(SEARCH, file), "utf8"));
-    if (!Array.isArray(raw)) continue;
-    byQuery[slug] ??= {};
-    byQuery[slug][platform] = raw.map((x) => ({
-      platform,
-      id: String(x.productId ?? x.id),
-      name: x.name,
-      brand: x.brand ?? null,
-      unit: x.unit ?? null,
-      price: x.price,
-      mrp: x.mrp,
-      discountPct: x.discountPct ?? 0,
-      inStock: x.inStock,
-    }));
+  for (const [q, platforms] of Object.entries(queries)) {
+    byQuery[q] = {};
+    for (const [platform, rows] of Object.entries(platforms)) {
+      byQuery[q][platform] = rows.map((row) => ({
+        platform,
+        ...Object.fromEntries(fields.map((f, i) => [f, row[i]])),
+      }));
+    }
   }
   return byQuery;
 }
 
 const corpus = loadCorpus();
+const labels = JSON.parse(readFileSync(join(FIXTURES, "labels.json"), "utf8"));
 const queries = Object.keys(corpus).sort();
 const products = queries.reduce((n, q) => n + Object.values(corpus[q]).reduce((m, list) => m + list.length, 0), 0);
 
-// ---- candidate list, in label order ------------------------------------
+// ---- candidates: every pair that passes the quantity and brand gates ----
+
+const pairKey = (q, b, z) => `${q}|${b.platform}:${b.id}|${z.platform}:${z.id}`;
+const truth = new Set(Object.entries(labels).flatMap(([q, pairs]) => pairs.map(([b, z]) => `${q}|${b}|${z}`)));
 
 const candidates = [];
 for (const q of queries) {
-  const B = corpus[q].blinkit ?? [];
-  const Z = corpus[q].zepto ?? [];
-  for (const b of B) {
-    for (const z of Z) {
+  for (const b of corpus[q].blinkit ?? []) {
+    for (const z of corpus[q].zepto ?? []) {
       if (!qtyEq(parseQty(b.unit, b.name), parseQty(z.unit, z.name))) continue;
       const bk = brandKey(b.brand);
       const zk = brandKey(z.brand);
       if (bk && zk && bk !== zk) continue;
-      candidates.push({ i: candidates.length + 1, q, b, z });
+      candidates.push({ q, b, z, label: truth.has(pairKey(q, b, z)) });
     }
   }
 }
-for (const c of candidates) c.label = TRUE_IDS.has(c.i);
 const positives = candidates.filter((c) => c.label).length;
 
-if (candidates.length !== EXPECTED_CANDIDATES || positives !== EXPECTED_POSITIVES) {
+if (positives !== truth.size) {
   console.error(
-    `bench-match: candidate list drifted from the hand labels — got ${candidates.length} candidates / ` +
-      `${positives} positives, expected ${EXPECTED_CANDIDATES} / ${EXPECTED_POSITIVES}.\n` +
-      "Every label index now points at a different pair, so the labels are meaningless. " +
-      "Fix the gates or the enumeration order before trusting any number from this script.",
+    `bench-match: ${truth.size - positives} labelled pair(s) are missing from the corpus or fail the gates; ` +
+      "fix labels.json before trusting any number from this script.",
   );
   process.exit(2);
 }
@@ -125,7 +111,7 @@ function evaluate(threshold) {
   let uncertainFp = 0;
   const errors = [];
   for (const c of candidates) {
-    const g = merged.get(`${c.q}|${c.b.platform}:${c.b.id}|${c.z.platform}:${c.z.id}`);
+    const g = merged.get(pairKey(c.q, c.b, c.z));
     if (g && c.label) {
       tp++;
       if (!g.confident) uncertainTp++;
@@ -176,7 +162,7 @@ console.log(`speed       ${perCall.toFixed(2)} ms to group ${biggest.length} pro
 
 for (const { kind, c, confident } of r.errors) {
   const how = kind === "FP" ? (confident ? "merged, unmarked" : "merged, marked uncertain") : "not merged";
-  console.log(`${kind} #${c.i} ${c.q} (${how})`);
+  console.log(`${kind} ${c.q} (${how})`);
   console.log(`   blinkit  ${c.b.name}  MRP ${c.b.mrp}`);
   console.log(`   zepto    ${c.z.name}  MRP ${c.z.mrp}`);
 }

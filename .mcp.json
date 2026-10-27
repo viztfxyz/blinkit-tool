@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "handcart": {
-      "command": "npx",
-      "args": ["-y", "tsx", "src/bin/handcart-mcp.ts"],
-      "cwd": "${workspaceFolder}"
-    }
-  }
-}

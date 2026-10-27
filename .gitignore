@@ -4,7 +4,10 @@ dist/
 *.log
 .env
 .env.*
-.cursor/hooks/state/
 coverage/
-.vite/.claude/settings.local.json
+.vite/
+.claude/settings.local.json
 *.tmp
+*.tgz
+session.json
+*.cookies
