@@ -4,6 +4,23 @@ All notable changes to this project are documented here. Entries are generated b
 [release-please](https://github.com/googleapis/release-please) from commit messages, and the project uses
 [Semantic Versioning](https://semver.org).
 
+## [0.2.0](https://github.com/viztfxyz/blinkit-tool/compare/v0.1.3...v0.2.0) (2026-10-27)
+
+
+### ⚠ BREAKING CHANGES
+
+* Handcart — Blinkit and Zepto as peers, with cross-platform search ([#20](https://github.com/viztfxyz/blinkit-tool/issues/20))
+
+### Features
+
+* Handcart — Blinkit and Zepto as peers, with cross-platform search ([#20](https://github.com/viztfxyz/blinkit-tool/issues/20)) ([2e32a7b](https://github.com/viztfxyz/blinkit-tool/commit/2e32a7b8ff52fa8ed4834c11f1cd0f1b0949778d))
+* **pay:** close the qrbaton pay page when the UPI QR expires ([#14](https://github.com/viztfxyz/blinkit-tool/issues/14)) ([08d4184](https://github.com/viztfxyz/blinkit-tool/commit/08d4184bbf8f79759780f5779bbbc82f79f4ba6b))
+
+
+### Bug Fixes
+
+* harden pay and login after security audit ([#21](https://github.com/viztfxyz/blinkit-tool/issues/21)) ([2a7ed22](https://github.com/viztfxyz/blinkit-tool/commit/2a7ed222da7d8fa32e828eaccb1c02fe69d1c62e))
+
 ## [0.1.3](https://github.com/viztfxyz/blinkit-tool/compare/v0.1.2...v0.1.3) (2026-10-26)
 
 
