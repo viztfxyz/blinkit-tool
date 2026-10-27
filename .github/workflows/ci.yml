@@ -37,7 +37,7 @@ jobs:
       - run: npm test
       - run: npm run build
       - name: CLI starts
-        run: node dist/bin/blinkit.js --version
+        run: node dist/bin/handcart.js --version
       - name: Package contents
         if: matrix.os == 'ubuntu-latest' && matrix.node == 24
         run: npm pack --dry-run
