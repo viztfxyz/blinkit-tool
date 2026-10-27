@@ -1,5 +1,5 @@
 import { HandcartError } from "../../core/errors.js";
-import { indianMobile } from "../../core/phone.js";
+import { indianMobile, maskPhone } from "../../core/phone.js";
 import { readJson, writeJson } from "../../core/storage.js";
 import type { Json } from "../../core/types.js";
 import { ZEPTO_BASE, zeptoPaths } from "./config.js";
@@ -108,7 +108,11 @@ export class Zepto {
     if (!this.loggedIn) throw new HandcartError("Zepto accepted the OTP but didn't start a session; try again");
     const { pendingPhone: _, ...rest } = this.state();
     this.save(rest);
-    return { loggedIn: true, phone: r?.user?.mobileNumber ?? st.pendingPhone, name: r?.user?.fullName ?? null };
+    return {
+      loggedIn: true,
+      phone: maskPhone(r?.user?.mobileNumber ?? st.pendingPhone),
+      name: r?.user?.fullName ?? null,
+    };
   }
 
   logout() {
