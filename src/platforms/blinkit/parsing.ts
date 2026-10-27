@@ -30,8 +30,6 @@ export function* walkWidgets(o: Json, widgetType: string): Generator<Json> {
   }
 }
 
-export const maskPhone = (phone?: string | null) => (phone ? `******${String(phone).slice(-4)}` : null);
-
 export function slugify(name: string): string {
   return name
     .toLowerCase()
