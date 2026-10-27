@@ -8,12 +8,15 @@ import { AmazonNow } from "../amazon/client.js";
 import { Blinkit } from "../client.js";
 import { SORTS, VERSION } from "../core/config.js";
 import { BlinkitError } from "../core/errors.js";
+import { allOk, formatChecks, runDoctor } from "../doctor.js";
 import { HANDOFFS, type Handoff, readPayStatus, writePayStatus } from "../pay/index.js";
 import type { SearchOptions } from "../services/catalog.js";
 import { AMAZON_INSTRUCTIONS, registerAmazonTools } from "./amazon.js";
 import { ok, tool } from "./tools.js";
 
-const INSTRUCTIONS = `Unofficial Blinkit tools.
+const INSTRUCTIONS = `Unofficial Blinkit tools. Call doctor first: if it isn't ready, show the user the ✗ lines
+and their Fix commands (logins can be done here with the *_login_* tools; the rest the user runs, or \`blinkit setup\`).
+Every error ends with a "Fix:" line saying what to do.
 Flow: blinkit_session → (optional) blinkit_login_request_otp + blinkit_login_verify_otp → blinkit_addresses →
 blinkit_use_address → blinkit_search or blinkit_categories/blinkit_browse → blinkit_cart_set → blinkit_checkout →
 (user confirms the amount) blinkit_pay → blinkit_pay_status → send the payLink (or, with handoff "qr", the QR image).
@@ -49,6 +52,17 @@ export function createServer(bk = new Blinkit(), now = new AmazonNow()): McpServ
     { instructions: `${INSTRUCTIONS}\n\n${AMAZON_INSTRUCTIONS}` },
   );
 
+  server.registerTool(
+    "doctor",
+    {
+      description:
+        "Call this first. Checks Node, build, browser (found and launches), Blinkit login, Amazon login, Amazon address and whether Amazon Now serves it. Returns ready, a one-line-per-check report (✓/✗ with a Fix command) and the checks.",
+    },
+    tool(async () => {
+      const checks = await runDoctor({ bk, now });
+      return { ready: allOk(checks), report: formatChecks(checks), checks };
+    }),
+  );
   server.registerTool(
     "blinkit_session",
     {

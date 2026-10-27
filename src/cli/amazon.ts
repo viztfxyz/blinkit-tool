@@ -18,7 +18,7 @@ const num = (v: string) => {
 };
 
 let client: AmazonNow | undefined;
-const now = () => (client ??= new AmazonNow());
+export const now = () => (client ??= new AmazonNow());
 
 function products(items: NowProduct[]): void {
   if (!items.length) {
