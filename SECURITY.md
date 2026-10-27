@@ -22,8 +22,8 @@ week. Once it's fixed and released, you'll be credited in the advisory unless yo
 
 ## Out of scope
 
-- Bugs in Blinkit, Zomato or qrbaton themselves (report those to them)
-- Blinkit blocking or rate-limiting automated access
+- Bugs in Blinkit, Zomato, Zepto or qrbaton themselves (report those to them)
+- Blinkit or Zepto blocking or rate-limiting automated access
 - Anyone with a qrbaton pay link being able to see that order's details: that's how pay links work; use
   `--handoff qr` to avoid it
 
