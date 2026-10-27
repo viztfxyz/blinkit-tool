@@ -81,30 +81,27 @@ export class NowLogin {
       if (/new to Amazon|create (your )?account/i.test(text) && !/Sign in another way/i.test(text)) {
         throw new BlinkitError("there is no Amazon account for this number");
       }
-      const error = await page
-        .locator("#auth-error-message-box, .a-alert-error")
-        .first()
-        .innerText()
-        .catch(() => "");
-      if (error.trim()) throw new BlinkitError(`Amazon: ${error.replace(/\s+/g, " ").trim()}`);
-
-      // "Use your passkey" → the full list of sign-in methods.
+      // "Use your passkey" → the full list of sign-in methods. Headless Chromium has no passkey, so
+      // Amazon may also show "Passkey error… sign in another way" here; that is expected, not fatal.
       const more = await page
         .locator("a.ax-challenge-more")
         .first()
         .getAttribute("href")
         .catch(() => null);
-      if (more) {
+      if (more && !page.url().includes("showOtherChallenges=true")) {
         await page.goto(new URL(more, page.url()).href, { waitUntil: "domcontentloaded" });
         await sleep(2000);
         continue;
       }
       // Method list, or a password page offering an OTP instead.
-      const otp = page.getByText(/Send OTP|Get an OTP|Sign in with OTP|one time password/i).first();
-      if (await otp.isVisible().catch(() => false)) {
-        await clickAndSettle(page, otp);
+      const otp = page.getByText(/Send OTP|Get an OTP|Sign in with OTP|one time password/i).filter({ visible: true });
+      if (await otp.count()) {
+        await clickAndSettle(page, otp.first());
         continue;
       }
+      const errors = page.locator("#auth-error-message-box, .a-alert-error").filter({ visible: true });
+      const error = (await errors.allInnerTexts().catch(() => [])).join(" ").replace(/\s+/g, " ").trim();
+      if (error && !/passkey/i.test(error)) throw new BlinkitError(`Amazon: ${error}`);
       if (await visible(page, "#ap_password")) {
         throw new BlinkitError("Amazon only offered password sign-in for this account; OTP login isn't available");
       }
