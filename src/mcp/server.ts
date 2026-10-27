@@ -285,7 +285,7 @@ export function createServer(bk = new Blinkit()): McpServer {
     "blinkit_pay_status",
     {
       description:
-        "Status of the last blinkit_pay. Stages: starting | launching | qr_ready | paid | failed | timeout | browser_closed | error. On qr_ready: payLink (send it to the user) when handoff is qrbaton; otherwise the UPI QR is attached as an image (send that). warning: qrbaton was unavailable, so only the QR is available. apiError: why the headless API fell back to the browser.",
+        "Status of the last blinkit_pay. Stages: starting | launching | qr_ready | paid | failed | timeout | browser_closed | error. On qr_ready: payLink (send it to the user) when handoff is qrbaton; otherwise the UPI QR is attached as an image (send that). qrExpiresAt: when the QR (and pay page) stops accepting payment, epoch ms; tell the payer how long they have. warning: qrbaton was unavailable, so only the QR is available. apiError: why the headless API fell back to the browser.",
     },
     async () => {
       const s = readPayStatus();

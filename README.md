@@ -149,7 +149,7 @@ Caches (pincode lookups, category tree, last pay status, QR image) live in `~/.c
 - **"session expired or not logged in"**: run `blinkit login <phone>` again.
 - **Search doesn't show something you expected**: it may be sold out; retry with `--out-of-stock`.
 - **`pay` says the amount differs**: the bill changed (stock, charges, promo). Run `blinkit checkout` and confirm the new amount.
-- **"createOrder returned no PAS token"**: the cart has a pending payment. Wait for it to expire (about 10 minutes) and retry.
+- **"createOrder returned no PAS token"**: the cart has a pending payment. Wait for its QR to expire (5 minutes after it was made) and retry.
 
 ## Project layout
 

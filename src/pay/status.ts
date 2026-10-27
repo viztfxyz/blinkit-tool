@@ -25,6 +25,8 @@ export interface PayStatus {
   /** UPI QR PNG on disk. With handoff "qr", send this image to the payer. */
   qrImage?: string;
   upiIntent?: string;
+  /** When the UPI QR stops accepting payment (epoch ms), if the gateway said. The pay page closes then too. */
+  qrExpiresAt?: number;
   /** qrbaton pay page (order summary, UPI app buttons, live status). Send this link to the payer. */
   payLink?: string;
   /** qrbaton session id. */

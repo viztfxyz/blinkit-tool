@@ -3,7 +3,7 @@
  *   1. GET  /createOrder/{cart_id}               → PAS token + orderHash
  *   2. POST /zomato_payment_hash                 → payment_hash + numeric order_id
  *   3. POST zomato.com/zpaykit/getPaymentMethods → laravel_session cookie
- *   4. POST zomato.com/zpaykit/makePayment       → upi://pay?… intent (QR payload)
+ *   4. POST zomato.com/zpaykit/makePayment       → upi://pay?… intent (QR payload) + its expiry
  *   5. poll zpaykit/verifyPaymentStatus
  */
 import type { CuimpHttp } from "cuimp";
@@ -130,6 +130,15 @@ export function pollDelaySec(reply: Json): number {
   return Number.isFinite(s) && s > 0 ? Math.min(30, Math.max(3, s)) : 5;
 }
 
+/**
+ * When the QR stops accepting payment, as epoch ms: makePayment's `qr_data.expiry_time` (unix
+ * seconds; 5 minutes after creation as of 2026-10-27). Undefined when absent or not a number.
+ */
+export function qrExpiresAt(txn: Json): number | undefined {
+  const s = Number(txn?.qr_data?.expiry_time);
+  return Number.isFinite(s) && s > 0 ? s * 1000 : undefined;
+}
+
 /** The status check identifies the payment by makePayment's track_id; without it zpaykit replies 400. */
 export function verifyForm(o: PreparedOrder, phone: string, trackId: string): Record<string, string> {
   return { ...commonForm(o, phone), track_id: trackId };
@@ -208,7 +217,7 @@ export async function payViaApi(bk: Blinkit, opts: PayOptions, progress: { run?:
     );
   }
 
-  await run.ready({ cart, upiIntent, orderId: prepared.orderId, trackId });
+  await run.ready({ cart, upiIntent, orderId: prepared.orderId, trackId, qrExpiresAt: qrExpiresAt(txn) });
   const form = verifyForm(prepared, phone, trackId);
   const deadline = Date.now() + (opts.timeoutSec ?? 600) * 1000;
   while (Date.now() < deadline) {
