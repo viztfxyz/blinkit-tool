@@ -7,35 +7,19 @@
 Unofficial [Blinkit](https://blinkit.com) client: search, browse, cart, checkout and UPI pay, as a **CLI**, a
 **TypeScript library**, and an **MCP server** for Claude, Cursor and other agents.
 
-Payment is headless (Blinkit → Zomato zpaykit, no browser needed). The UPI QR is handed to whoever pays either as a
-[qrbaton](https://qrbaton.vercel.app) pay page (items, bill, delivery address, one-tap GPay / PhonePe / Paytm) or
-as a plain QR image.
+## Quick start
+
+```bash
+npm install -g blinkit-tool
+blinkit setup
+blinkit doctor
+```
 
 > [!WARNING]
 > Not affiliated with, endorsed by, or supported by Blinkit or Zomato. It talks to the same private
 > endpoints blinkit.com uses, which can change or break at any time, and automated use may be against
 > their terms. Use it for your own account, at your own risk. Real orders and real money are involved:
 > `pay` only proceeds when you pass the exact amount `checkout` showed.
-
-## Requirements
-
-- Node.js ≥ 22
-- A Chromium-based browser only for `pay --browser` (or if the headless API path fails)
-
-## Install
-
-```bash
-npm install -g blinkit-tool       # gives you the `blinkit` command
-blinkit search milk -p 560034
-```
-
-Or run it without installing:
-
-```bash
-npx blinkit-tool search milk -p 560034
-```
-
-As a library in your own project: `npm install blinkit-tool`. To hack on it, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## CLI
 
@@ -65,6 +49,10 @@ looks up the categories the top results belong to and pages their listings, so i
 `blinkit product <id>` works for sold-out products too.
 
 ### Paying
+
+Payment is headless (Blinkit → Zomato zpaykit, no browser needed). The UPI QR is handed to whoever pays either as a
+[qrbaton](https://qrbaton.vercel.app) pay page (items, bill, delivery address, one-tap GPay / PhonePe / Paytm) or
+as a plain QR image.
 
 `blinkit pay --confirm <rupees>` places the order and waits for the UPI payment (10 minutes by default). How the
 QR reaches the payer is set with `--handoff`:
@@ -104,7 +92,8 @@ Add the stdio server to your client. `npx` downloads and runs the latest version
 - **Cursor**: `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global)
 - **Grok CLI**: `grok mcp add blinkit -- npx -y blinkit-tool mcp`
 
-Log in once from a terminal (`npx blinkit-tool login <phone>`), or let the agent do it with the OTP tools.
+Run `npx blinkit-tool setup` once from a terminal, or let the agent log in with the OTP tools. Agents call the
+`doctor` tool first to see what's missing.
 
 The server runs on your machine, so cloud-only agents can't reach it.
 
@@ -135,8 +124,9 @@ blinkit amazon orders                     # delivery and payment state
 ```
 
 - **Works on a headless server.** Amazon's sign-in and payment pages need a real browser, so `login` and `pay` run
-  Chromium headless; everything else is plain HTTP. If no Chrome/Chromium is installed, run
-  `npx playwright install chromium`.
+  Chromium headless; everything else is plain HTTP. If no browser is installed, `blinkit setup` downloads the
+  headless-only one.
+- **"Amazon couldn't send the OTP"**: wait a few minutes, or use the other channel (`--via whatsapp` / `--via sms`).
 - **Login runs in one process.** `blinkit amazon login` waits for the OTP at a prompt; over MCP the server keeps the
   sign-in open between `amazon_now_login_request_otp` and `amazon_now_login_verify_otp`.
 - **Pay is UPI QR only and never uses Amazon Pay balance.** Amazon pre-selects your balance on its payment page;
@@ -167,18 +157,48 @@ console.log((await bk.cart.get()).bill.toPay);
 // Pay:   await payWithUpi(bk, { confirmAmount: 642, handoff: "qr", openPage: false });
 ```
 
+## Install and requirements
+
+- Node.js ≥ 22
+- A Chromium-based browser for Amazon Now login and pay, and for Blinkit's `pay --browser`. It is found
+  automatically (`BLINKIT_BROWSER`, the Playwright cache, then Chrome, Edge, Brave or Chromium where they are
+  normally installed, then `PATH`) and remembered in `~/.config/blinkit-tool/config.json`. If there is none,
+  `blinkit setup` (or any command that needs one, at a terminal) asks before downloading Playwright's ~100 MB
+  headless-only Chromium (`npx playwright install --only-shell chromium`); a dropped download resumes. Nothing is
+  downloaded when you install the package. `pay --browser` opens a window, so it needs a full browser such as Chrome.
+
+```bash
+npm install -g blinkit-tool       # gives you the `blinkit` command
+npx blinkit-tool search milk -p 560034   # or run it without installing
+```
+
+As a library in your own project: `npm install blinkit-tool`. To hack on it, see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+### `blinkit setup` and `blinkit doctor`
+
+`blinkit setup` walks through everything once: it finds (or downloads) the browser, logs in to Blinkit and Amazon
+(phone number and OTP; it tells you whether Amazon sent the code by SMS or WhatsApp), picks the delivery addresses,
+runs `doctor` and ends with "Ready". Run it again any time: finished steps are skipped.
+
+`blinkit doctor` prints one line per check (Node, build, browser path, browser launch, Blinkit login, Amazon login,
+Amazon address, whether Amazon Now serves it), ✓ or ✗ with the command that fixes it, and exits non-zero if anything
+is ✗. Agents get the same as the MCP tool `doctor`.
+
 ## Configuration
 
-| Variable             | Purpose                                                                           |
-| -------------------- | --------------------------------------------------------------------------------- |
-| `BLINKIT_SESSION`    | Session file (default `~/.config/blinkit-tool/session.json`, owner-readable only) |
-| `BLINKIT_BROWSER`    | Chromium-based browser for the browser pay path (auto-detected otherwise)         |
-| `QRBATON_URL`        | qrbaton host, if you run your own (default `https://qrbaton.vercel.app`)          |
-| `AMAZON_NOW_COOKIES` | Amazon Now session file (default `~/.config/blinkit-tool/amazon-now.cookies`)     |
+| Variable             | Purpose                                                                              |
+| -------------------- | ------------------------------------------------------------------------------------ |
+| `BLINKIT_SESSION`    | Session file (default `~/.config/blinkit-tool/session.json`, owner-readable only)    |
+| `BLINKIT_BROWSER`    | Chromium-based browser to use (found automatically otherwise)                        |
+| `BLINKIT_CONFIG`     | Settings file, e.g. the browser found (default `~/.config/blinkit-tool/config.json`) |
+| `QRBATON_URL`        | qrbaton host, if you run your own (default `https://qrbaton.vercel.app`)             |
+| `AMAZON_NOW_COOKIES` | Amazon Now session file (default `~/.config/blinkit-tool/amazon-now.cookies`)        |
 
 Caches (pincode lookups, category tree, last pay status, QR image) live in `~/.cache/blinkit-tool/`.
 
 ## Troubleshooting
+
+Run `blinkit doctor` first. Every error ends with a `Fix:` line naming the command to run.
 
 - **"blinkit.com is refusing automated requests"**: Cloudflare is challenging the request. Wait a few minutes and retry.
 - **"session expired or not logged in"**: run `blinkit login <phone>` again.
@@ -194,7 +214,9 @@ src/
   cli/        commander commands and terminal formatting
   mcp/        MCP tool definitions
   client.ts   Blinkit: the public client (session + catalog, cart, account)
-  core/       config, HTTP transport (Chrome TLS impersonation), session, storage, errors
+  doctor.ts   the checks behind `blinkit doctor` and the MCP tool `doctor`
+  core/       config, HTTP transport (Chrome TLS impersonation), session, storage, errors and their fixes,
+              browser search and download
   services/   catalog, cart, account, and parsing of Blinkit's layout payloads
   pay/        zpaykit API path, browser fallback, QR decoding, qrbaton / QR handoff
   types.ts    shared types
