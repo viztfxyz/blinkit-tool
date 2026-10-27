@@ -177,10 +177,20 @@ export function parseOrder(o: Json): ZeptoOrder {
 
 export type ZeptoPayOutcome = "paid" | "failed";
 
-/** Zepto's payment-id-status `data.status` → final outcome, or null while the payment is open. */
+const PAID = new Set(["SUCCESS", "SUCCESSFUL", "SUCCEEDED", "COMPLETED", "PAID", "CAPTURED", "CHARGED"]);
+
+/**
+ * Zepto's payment-id-status `data.status` → final outcome, or null while the payment is open.
+ * Failure and not-paid states are checked first and "paid" needs an exact token, so UNPAID, NOT_PAID
+ * or PAYMENT_NOT_COMPLETED can never read as paid.
+ */
 export function payOutcome(status: string | null | undefined): ZeptoPayOutcome | null {
-  const s = String(status ?? "").toUpperCase();
-  if (/SUCCE|COMPLET|PAID|CAPTURED|CHARGED/.test(s)) return "paid";
-  if (/FAIL|DECLIN|REJECT|CANCEL|EXPIRE|ERROR/.test(s)) return "failed";
-  return null;
+  const s = String(status ?? "")
+    .trim()
+    .toUpperCase();
+  if (/FAIL|DECLIN|REJECT|CANCEL|EXPIRE|ERROR|REVERS|REFUND|ABORT/.test(s)) return "failed";
+  // Not paid yet, but not over either: the QR may still be paid, so keep waiting.
+  if (/UNPAID|NOT_|INCOMPLET/.test(s)) return null;
+  const token = s.replace(/^PAYMENT_/, "");
+  return PAID.has(token) ? "paid" : null;
 }
