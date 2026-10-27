@@ -10,6 +10,7 @@ import type { SearchOptions } from "../services/catalog.js";
 import { now, registerAmazon } from "./amazon.js";
 import * as fmt from "./format.js";
 import { closePrompts, confirm } from "./prompt.js";
+import { registerSetup } from "./setup.js";
 
 const int = (v: string) => {
   const n = Number.parseInt(v, 10);
@@ -243,6 +244,8 @@ program
 registerAmazon(program);
 
 // ---------- setup ----------
+
+registerSetup(program, bk, now);
 
 program
   .command("doctor")
