@@ -7,9 +7,9 @@
  *   5. poll zpaykit/verifyPaymentStatus
  */
 import type { CuimpHttp } from "cuimp";
-import type { Blinkit } from "../client.js";
-import { BlinkitError } from "../core/errors.js";
-import type { Json } from "../types.js";
+import { HandcartError } from "../core/errors.js";
+import type { Blinkit } from "../platforms/blinkit/client.js";
+import type { Json } from "../platforms/blinkit/types.js";
 import { confirmedCheckout, type PayOptions, PayRun } from "./flow.js";
 import type { PayStatus } from "./status.js";
 
@@ -33,8 +33,8 @@ export function prepareFailureMessage(call: string, status: number, body?: strin
 }
 
 function rewritePrepareError(call: string, error: unknown): Error {
-  if (error instanceof BlinkitError && error.status != null && error.status >= 400) {
-    return new BlinkitError(prepareFailureMessage(call, error.status, error.body, error.message));
+  if (error instanceof HandcartError && error.status != null && error.status >= 400) {
+    return new HandcartError(prepareFailureMessage(call, error.status, error.body, error.message));
   }
   return error instanceof Error ? error : new Error(String(error));
 }
@@ -56,7 +56,7 @@ export async function prepareOrder(bk: Blinkit, cartId: string): Promise<Prepare
   const co = await prepareCall(bk, "GET", `/createOrder/${cartId}`, { needLogin: true });
   const pasToken = co?.response?.access_token as string | undefined;
   if (!pasToken) {
-    throw new BlinkitError(
+    throw new HandcartError(
       "createOrder returned no PAS token — the cart may already have a pending payment. " +
         "Clear the pending txn (or wait for it to expire), then retry.",
     );
@@ -67,7 +67,7 @@ export async function prepareOrder(bk: Blinkit, cartId: string): Promise<Prepare
   });
   const meta = ph?.zomato_payment_hash_meta;
   if (!meta?.payment_hash || !meta?.order_id) {
-    throw new BlinkitError(`zomato_payment_hash failed: ${JSON.stringify(ph).slice(0, SNIPPET)}`);
+    throw new HandcartError(`zomato_payment_hash failed: ${JSON.stringify(ph).slice(0, SNIPPET)}`);
   }
   return {
     cartId: String(cartId),
@@ -178,9 +178,10 @@ export async function zpost(
 export async function payViaApi(bk: Blinkit, opts: PayOptions, progress: { run?: PayRun }): Promise<PayStatus> {
   const cart = await confirmedCheckout(bk, opts.confirmAmount);
   const phone = bk.state.user?.phone;
-  if (!phone) throw new BlinkitError("session has no phone number; log in again with `blinkit login <phone>`");
+  if (!phone)
+    throw new HandcartError("session has no phone number; log in again with `handcart blinkit login <phone>`");
   const cartId = bk.state.cartId ?? cart.cartId;
-  if (!cartId) throw new BlinkitError("no server cart id; run `blinkit checkout` first");
+  if (!cartId) throw new HandcartError("no server cart id; run `handcart blinkit checkout` first");
   const toPay = cart.bill.toPay;
 
   const run = new PayRun(bk, opts, toPay);
@@ -189,7 +190,7 @@ export async function payViaApi(bk: Blinkit, opts: PayOptions, progress: { run?:
   run.log(`Preparing order for cart ${cartId}…`);
   const prepared = await prepareOrder(bk, String(cartId));
   if (Math.round(prepared.payable * 100) !== Math.round(toPay * 100)) {
-    throw new BlinkitError(`payment hash amount is ₹${prepared.payable} but checkout showed ₹${toPay}; aborting`);
+    throw new HandcartError(`payment hash amount is ₹${prepared.payable} but checkout showed ₹${toPay}; aborting`);
   }
 
   const client = await bk.http.chromeClient();
@@ -212,7 +213,7 @@ export async function payViaApi(bk: Blinkit, opts: PayOptions, progress: { run?:
   const trackId = txn?.track_id as string | undefined;
   if (!upiIntent?.startsWith("upi:") || !trackId) {
     const status = String(txn?.status ?? mp?.response?.status ?? "unknown");
-    throw new BlinkitError(
+    throw new HandcartError(
       `makePayment did not return a UPI intent and track_id (status=${status}): ${JSON.stringify(mp).slice(0, 240)}`,
     );
   }

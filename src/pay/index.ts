@@ -3,7 +3,7 @@
  * issued, or with `browser: true`, blinkit.com is driven in Chromium instead (browser.ts). Either
  * way the QR is handed off as a qrbaton pay link or a plain QR image (handoff.ts).
  */
-import type { Blinkit } from "../client.js";
+import type { Blinkit } from "../platforms/blinkit/client.js";
 import { payViaBrowser } from "./browser.js";
 import type { PayOptions, PayRun } from "./flow.js";
 import { type PayStatus, readPayStatus, writePayStatus } from "./status.js";

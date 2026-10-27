@@ -1,18 +1,19 @@
-import { paths, type Sort } from "../core/config.js";
-import { BlinkitError } from "../core/errors.js";
-import type { Core } from "../core/session.js";
-import { readJson, writeJson } from "../core/storage.js";
+import { HandcartError } from "../../core/errors.js";
+import { readJson, writeJson } from "../../core/storage.js";
+import type { Sort } from "../../core/types.js";
+import { paths } from "./config.js";
+import { findKey, fromCartItem, parseCard, refine, scanSize, walkWidgets } from "./parsing.js";
+import type { Core } from "./session.js";
 import type {
+  BlinkitProduct,
+  BlinkitProductDetails,
   CategoryGroup,
   CategoryMatch,
   Coords,
   Filters,
   Json,
-  Product,
-  ProductDetails,
   Subcategory,
-} from "../types.js";
-import { findKey, fromCartItem, parseCard, refine, scanSize, walkWidgets } from "./parsing.js";
+} from "./types.js";
 
 export interface Where {
   pincode?: string;
@@ -39,7 +40,7 @@ export interface BrowseResult {
   group: string;
   category?: string;
   subcategories?: { id: number; name: string }[];
-  products: Product[];
+  products: BlinkitProduct[];
 }
 
 /** Stop paging a listing after this many products (a big subcategory has a few hundred). */
@@ -60,7 +61,7 @@ async function mapLimit<T, R>(items: T[], n: number, fn: (x: T) => Promise<R>): 
 }
 
 /** Every word of the query (ignoring a plural "s") appears in the product's name or brand. */
-function matchesQuery(p: Product, query: string): boolean {
+function matchesQuery(p: BlinkitProduct, query: string): boolean {
   const hay = `${p.name} ${p.brand ?? ""}`.toLowerCase();
   return query
     .toLowerCase()
@@ -80,7 +81,7 @@ const filtersOf = (o: Filters): Filters => ({
 export class Catalog {
   constructor(private core: Core) {}
 
-  async search(query: string, opts: SearchOptions = {}): Promise<Product[]> {
+  async search(query: string, opts: SearchOptions = {}): Promise<BlinkitProduct[]> {
     const { limit = 24, sort = "relevance", includeRelated = true } = opts;
     const loc = await this.core.resolveLocation(opts);
     const filters = filtersOf(opts);
@@ -97,7 +98,7 @@ export class Catalog {
    * Blinkit's search never returns sold-out products. Find them in the listings of the
    * subcategories the top direct matches belong to (or one named like the query).
    */
-  private async soldOutMatches(query: string, items: Product[], loc: Coords): Promise<Product[]> {
+  private async soldOutMatches(query: string, items: BlinkitProduct[], loc: Coords): Promise<BlinkitProduct[]> {
     const direct = items.filter((p) => !p.related).slice(0, 3);
     const crumbs = await mapLimit(direct, 3, (p) =>
       this.product(p.productId, loc).then(
@@ -118,7 +119,7 @@ export class Catalog {
     const lists = await mapLimit(l1s, 3, (l1) =>
       this.collect(`/v1/layout/listing_widgets?l1_cat=${l1}`, loc, MAX_LISTING),
     );
-    const out = new Map<number, Product>();
+    const out = new Map<number, BlinkitProduct>();
     for (const p of lists.flat()) if (!p.inStock && matchesQuery(p, query)) out.set(p.productId, p);
     return [...out.values()];
   }
@@ -140,7 +141,7 @@ export class Catalog {
 
   /** Page through a search/listing layout, returning parsed product cards. */
   private async collect(path: string | undefined, loc: Coords, scan: number, includeRelated = true) {
-    const out: Product[] = [];
+    const out: BlinkitProduct[] = [];
     const seen = new Set<number>();
     let related = false;
     while (path && out.length < scan) {
@@ -167,10 +168,10 @@ export class Catalog {
     return out;
   }
 
-  async product(productId: number, where: Where = {}): Promise<ProductDetails> {
+  async product(productId: number, where: Where = {}): Promise<BlinkitProductDetails> {
     const loc = await this.core.resolveLocation(where);
     const resp = (await this.core.req("POST", `/v1/layout/product/${productId}`, { loc, json: {} })).response ?? {};
-    let result: ProductDetails = { productId, attributes: {} };
+    let result: BlinkitProductDetails = { productId, attributes: {} };
     for (const sn of resp.snippets ?? []) {
       const d = sn.data ?? {};
       if (sn.widget_type === "product_atc_strip") {
@@ -185,7 +186,7 @@ export class Catalog {
       const v = node.subtitle?.text;
       if (t && v && !(t in result.attributes)) result.attributes[t] = String(v).trim();
     }
-    if (!result.name) throw new BlinkitError(`product ${productId} not available at this location`);
+    if (!result.name) throw new HandcartError(`product ${productId} not available at this location`);
     return result;
   }
 
@@ -242,7 +243,7 @@ export class Catalog {
       if (hits.length) {
         const cats = hits.filter((e) => e.type === "category"); // a category beats same-named subcategories
         if (cats.length === 1) return cats[0];
-        throw new BlinkitError(
+        throw new HandcartError(
           "ambiguous, pick one: " +
             hits
               .slice(0, 15)
@@ -251,7 +252,7 @@ export class Catalog {
         );
       }
     }
-    throw new BlinkitError(`no category or subcategory matches '${nameOrId}'; see \`blinkit categories\``);
+    throw new HandcartError(`no category or subcategory matches '${nameOrId}'; see \`handcart blinkit categories\``);
   }
 
   /** Products in a subcategory, or interleaved across all subcategories of a category. */
@@ -260,7 +261,7 @@ export class Catalog {
     const loc = await this.core.resolveLocation(opts);
     const e = await this.findCategory(category);
     if (e.type === "group") {
-      throw new BlinkitError(`'${e.name}' is a group; pick a category: ${e.categories.map((c) => c.name).join(", ")}`);
+      throw new HandcartError(`'${e.name}' is a group; pick a category: ${e.categories.map((c) => c.name).join(", ")}`);
     }
     const subs = e.type === "subcategory" ? [e] : e.subcategories;
     const filters = filtersOf(opts);
@@ -269,7 +270,7 @@ export class Catalog {
     // sold-out products come last in a listing, so finding them means paging it to the end
     const per = withSoldOut ? MAX_LISTING : subs.length === 1 ? scan : Math.max(3, Math.ceil(scan / subs.length));
     const lists = await mapLimit(subs, 4, async (s) => {
-      const list: Product[] = [];
+      const list: BlinkitProduct[] = [];
       for (const l1 of s.l1CatIds) {
         for (const p of await this.collect(`/v1/layout/listing_widgets?l1_cat=${l1}`, loc, per)) {
           list.push({ ...p, subcategory: s.name });
@@ -278,7 +279,7 @@ export class Catalog {
       return list;
     });
     // interleave subcategories so a whole-category listing isn't just the first one
-    const items: Product[] = [];
+    const items: BlinkitProduct[] = [];
     const seen = new Set<number>();
     for (let i = 0; i < Math.max(0, ...lists.map((l) => l.length)); i++) {
       for (const l of lists) {
