@@ -6,9 +6,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Blinkit } from "../src/client.js";
 import { paths } from "../src/core/config.js";
 import { BlinkitError } from "../src/core/errors.js";
-import { handOff, qrbatonOrder, qrbatonStatusFor } from "../src/pay/handoff.js";
+import { handOff, payPageTtlSec, qrbatonOrder, qrbatonStatusFor } from "../src/pay/handoff.js";
 import { decodeQrPng, extractUpiIntent, upiIntentFromCapture } from "../src/pay/qr.js";
-import { paymentState, pollDelaySec, prepareFailureMessage, prepareOrder, verifyForm } from "../src/pay/zpaykit.js";
+import {
+  paymentState,
+  pollDelaySec,
+  prepareFailureMessage,
+  prepareOrder,
+  qrExpiresAt,
+  verifyForm,
+} from "../src/pay/zpaykit.js";
 import type { Cart } from "../src/types.js";
 
 const qrOpts = { type: "png" as const, width: 280, margin: 2, errorCorrectionLevel: "M" as const };
@@ -239,6 +246,29 @@ describe("handoff", () => {
     expect(r).toEqual({ handoff: "qr", qrImage: paths.qr, upiIntent: intent });
   });
 
+  it("closes the pay page when the QR expires", async () => {
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ id: "s3", url: "https://qrbaton.example/p/s3" }), { status: 201 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const expires = Date.now() + 299_000;
+    const r = await handOff("qrbaton", { cart, amount: 84, upiIntent: intent, ttlSec: 600, qrExpiresAt: expires });
+    const body = JSON.parse((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string);
+    expect(body.ttlSec).toBeGreaterThanOrEqual(298);
+    expect(body.ttlSec).toBeLessThanOrEqual(299);
+    expect(r.qrExpiresAt).toBe(expires);
+  });
+
+  it("takes the sooner of the run timeout and the QR expiry, within qrbaton's limits", () => {
+    const now = 1_000_000;
+    expect(payPageTtlSec({ ttlSec: 600, qrExpiresAt: now + 300_000 }, now)).toBe(300);
+    expect(payPageTtlSec({ ttlSec: 120, qrExpiresAt: now + 300_000 }, now)).toBe(120);
+    expect(payPageTtlSec({ qrExpiresAt: now + 300_000 }, now)).toBe(300);
+    expect(payPageTtlSec({ ttlSec: 600, qrExpiresAt: now + 10_000 }, now)).toBe(60);
+    expect(payPageTtlSec({ ttlSec: 600 }, now)).toBe(600);
+    expect(payPageTtlSec({}, now)).toBeUndefined();
+  });
+
   it("maps terminal stages to qrbaton statuses", () => {
     expect(qrbatonStatusFor("paid")).toBe("paid");
     expect(qrbatonStatusFor("failed")).toBe("failed");
@@ -294,6 +324,21 @@ describe("zpaykit payment status", () => {
     expect(paymentState({ response: { status: "SUCCESS" } })).toBe("paid");
     expect(paymentState({ response: { status: "failed" } })).toBe("failed");
     expect(paymentState({ response: { status: "cancelled" } })).toBe("failed");
+  });
+
+  it("reads the QR expiry from makePayment's qr_data", () => {
+    // Real makePayment transaction (2026-10-27), image trimmed: expiry_time is 299 s after creation.
+    const txn = {
+      status: "pending",
+      track_id: "ZTBLINUPIQR00000000",
+      message: "Payment successfully initiated",
+      qr_data: { data: "upi://pay?am=76&cu=INR&mode=04&pa=blinkit.rzp@hdfcbank&pn=Blinkit", expiry_time: 1793083948 },
+      gateway_type: "razorpay",
+    };
+    expect(qrExpiresAt(txn)).toBe(1793083948000);
+    expect(qrExpiresAt({ qr_data: { data: "upi://pay" } })).toBeUndefined();
+    expect(qrExpiresAt({ qr_data: { expiry_time: "soon" } })).toBeUndefined();
+    expect(qrExpiresAt(undefined)).toBeUndefined();
   });
 
   it("polls at zpaykit's requested interval, within limits", () => {

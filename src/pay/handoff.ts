@@ -24,6 +24,8 @@ export interface HandoffInput {
   agent?: string;
   /** How long the pay page stays open. */
   ttlSec?: number;
+  /** When the UPI QR stops accepting payment (epoch ms), as zpaykit reports it. Caps the pay page's life. */
+  qrExpiresAt?: number;
 }
 
 export interface HandoffResult {
@@ -34,6 +36,8 @@ export interface HandoffResult {
   sessionId?: string;
   /** Bearer token for updating the qrbaton page's status. Kept in memory only. */
   manageToken?: string;
+  /** When the UPI QR stops accepting payment (epoch ms), if known. */
+  qrExpiresAt?: number;
   warning?: string;
 }
 
@@ -93,12 +97,31 @@ export function qrbatonOrder(input: HandoffInput): QrbatonOrder {
   };
 }
 
+/**
+ * Seconds the qrbaton page should accept payment: `ttlSec`, cut short to when the QR expires so the
+ * page never offers a dead QR. Within qrbaton's 60–86400 limits; undefined leaves qrbaton's default.
+ */
+export function payPageTtlSec(
+  input: Pick<HandoffInput, "ttlSec" | "qrExpiresAt">,
+  now = Date.now(),
+): number | undefined {
+  const untilExpiry = input.qrExpiresAt ? (input.qrExpiresAt - now) / 1000 : undefined;
+  const ttl = Math.min(input.ttlSec ?? Infinity, untilExpiry ?? Infinity);
+  return Number.isFinite(ttl) ? Math.min(86400, Math.max(60, Math.round(ttl))) : undefined;
+}
+
 /** Write the QR and, for "qrbaton", create the pay page. Falls back to the bare QR if qrbaton fails. */
 export async function handOff(mode: Handoff, input: HandoffInput): Promise<HandoffResult> {
   const upiIntent = input.upiIntent ?? undefined;
   const qrImage = await writeQr(paths.qr, { upiIntent, png: input.qrPng });
-  const qrOnly: HandoffResult = { handoff: "qr", qrImage, ...(upiIntent ? { upiIntent } : {}) };
+  const qrOnly: HandoffResult = {
+    handoff: "qr",
+    qrImage,
+    ...(upiIntent ? { upiIntent } : {}),
+    ...(input.qrExpiresAt ? { qrExpiresAt: input.qrExpiresAt } : {}),
+  };
   if (mode === "qr") return qrOnly;
+  const ttlSec = payPageTtlSec(input);
   try {
     const r = await fetch(`${QRBATON_URL}/api/sessions`, {
       method: "POST",
@@ -106,7 +129,7 @@ export async function handOff(mode: Handoff, input: HandoffInput): Promise<Hando
       body: JSON.stringify({
         ...(upiIntent ? { upi: upiIntent } : { qr: readFileSync(qrImage).toString("base64") }),
         order: qrbatonOrder(input),
-        ...(input.ttlSec ? { ttlSec: Math.min(86400, Math.max(60, Math.round(input.ttlSec))) } : {}),
+        ...(ttlSec ? { ttlSec } : {}),
       }),
       signal: AbortSignal.timeout(15_000),
     });

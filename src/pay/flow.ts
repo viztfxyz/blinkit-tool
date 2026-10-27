@@ -64,7 +64,14 @@ export class PayRun {
     return writePayStatus({ ...this.meta, ...extra, stage });
   }
 
-  async ready(input: { cart: Cart; upiIntent?: string | null; qrPng?: Buffer; orderId?: number; trackId?: string }) {
+  async ready(input: {
+    cart: Cart;
+    upiIntent?: string | null;
+    qrPng?: Buffer;
+    orderId?: number;
+    trackId?: string;
+    qrExpiresAt?: number;
+  }) {
     const { opts, log } = this;
     const r = await handOff(opts.handoff ?? "qrbaton", {
       ...input,
@@ -79,6 +86,7 @@ export class PayRun {
       handoff: r.handoff,
       qrImage: r.qrImage,
       ...(r.upiIntent ? { upiIntent: r.upiIntent } : {}),
+      ...(r.qrExpiresAt ? { qrExpiresAt: r.qrExpiresAt } : {}),
       ...(r.payLink ? { payLink: r.payLink, sessionId: r.sessionId } : {}),
       ...(r.warning ? { warning: r.warning } : {}),
       ...(input.orderId ? { orderId: input.orderId } : {}),
@@ -86,6 +94,7 @@ export class PayRun {
     };
     this.status("qr_ready");
     if (r.warning) log(`warning: ${r.warning}`);
+    if (r.qrExpiresAt) log(`QR expires at ${new Date(r.qrExpiresAt).toLocaleTimeString()}`);
     const open = opts.openPage !== false;
     if (r.payLink) {
       if (open) openUrl(r.payLink);
