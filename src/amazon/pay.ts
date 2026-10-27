@@ -9,7 +9,7 @@
  *      it over as a qrbaton pay page or a PNG. The browser closes; nothing else needs it.
  *   4. HTTP: poll /aips/get-status until Amazon reports the payment done, failed, or the QR expires.
  */
-import type { Page } from "playwright-core";
+import type { Locator, Page } from "playwright-core";
 import { BlinkitError } from "../core/errors.js";
 import {
   type HandoffResult,
@@ -180,23 +180,42 @@ async function toPaymentPage(page: Page, log: (m: string) => void): Promise<void
   }
 }
 
-async function selectUpiQr(page: Page): Promise<void> {
+/**
+ * Pick "Scan and Pay with UPI". Amazon pre-selects the Amazon Pay balance: a radio in the same group when
+ * it covers the order, the ppw-APBSelection checkbox when it covers part of it. The widget can reload after
+ * a pick and select the balance again, so re-check a few times; paymentPageProblem still refuses to pay if
+ * the balance stays selected.
+ */
+async function selectUpiQr(page: Page, log: (m: string) => void): Promise<void> {
   await page.locator("input[name='ppw-instrumentRowSelection']").first().waitFor({ state: "attached", timeout: 30000 });
   const radios = page.locator(
     "input[name='ppw-instrumentRowSelection'][value*='paymentMethod=UnifiedPaymentsInterface']",
   );
-  const labels = await radios.evaluateAll((els) =>
-    els.map((e) => {
-      let n: HTMLElement | null = e as HTMLElement;
-      for (let k = 0; k < 6 && n && (n.innerText ?? "").trim().length < 12; k++) n = n.parentElement;
-      return (n?.innerText ?? "").replace(/\s+/g, " ");
-    }),
-  );
-  const idx = labels.findIndex((l) => /scan and pay/i.test(l));
-  if (idx < 0)
-    throw new BlinkitError(`Amazon didn't offer "Scan and Pay with UPI" for this order (${await snapshot(page)})`);
-  await radios.nth(idx).check({ force: true });
-  await sleep(3000); // the widget saves the selection (continueWidget) before Pay is safe to press
+  const balance = page.locator("input[name='ppw-APBSelection'], input[value*='paymentMethod=APB']");
+  const box = page.locator("input[type=checkbox][name='ppw-APBSelection']");
+  const anyChecked = (l: Locator) => l.evaluateAll((els) => els.some((e) => (e as HTMLInputElement).checked));
+  for (let attempt = 0; attempt < 4; attempt++) {
+    await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => undefined);
+    const labels = await radios.evaluateAll((els) =>
+      els.map((e) => {
+        let n: HTMLElement | null = e as HTMLElement;
+        for (let k = 0; k < 6 && n && (n.innerText ?? "").trim().length < 12; k++) n = n.parentElement;
+        return (n?.innerText ?? "").replace(/\s+/g, " ");
+      }),
+    );
+    const idx = labels.findIndex((l) => /scan and pay/i.test(l));
+    if (idx < 0)
+      throw new BlinkitError(`Amazon didn't offer "Scan and Pay with UPI" for this order (${await snapshot(page)})`);
+    if (await anyChecked(box)) {
+      log("Turning off Amazon Pay balance on the payment page…");
+      await box.first().uncheck({ force: true });
+      await sleep(1500);
+    }
+    await radios.nth(idx).check({ force: true });
+    await sleep(3000); // the widget saves the selection (continueWidget) before Pay is safe to press
+    if (!(await anyChecked(balance)) && (await radios.nth(idx).isChecked())) return;
+    log("Amazon Pay balance is still selected; selecting Scan & Pay UPI again…");
+  }
 }
 
 /** Read Amazon's QR page: the QR PNG and what /aips/get-status needs. */
@@ -243,7 +262,7 @@ export async function payNow(deps: NowPayDeps, opts: NowPayOptions): Promise<Now
     b = await openBrowser(deps.session);
     log("Opening Amazon Now checkout…");
     await toPaymentPage(b.page, log);
-    await selectUpiQr(b.page);
+    await selectUpiQr(b.page, log);
     const pageProblem = paymentPageProblem(await b.page.evaluate(readPaymentPage), amount);
     if (pageProblem) throw new BlinkitError(`${pageProblem} (${await snapshot(b.page)})`);
     if (opts.dryRun) {
