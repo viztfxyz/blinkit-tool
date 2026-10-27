@@ -13,6 +13,13 @@ import type { NowSession } from "./session.js";
 export type OtpChannel = "sms" | "whatsapp";
 export const OTP_CHANNELS = ["sms", "whatsapp"] as const satisfies readonly OtpChannel[];
 
+/** Where the OTP screen says the code went; "unknown" when it doesn't say. */
+export function otpSentVia(text: string): OtpChannel | "unknown" {
+  if (/sent.{0,60}WhatsApp|WhatsApp.{0,40}(code|OTP)|Verify with WhatsApp/i.test(text)) return "whatsapp";
+  if (/sent.{0,60}(SMS|text message|mobile number)|\bSMS\b.{0,40}(code|OTP)/i.test(text)) return "sms";
+  return "unknown";
+}
+
 const OTP_INPUT = "#ap_otp_code, input[name=otpCode], #cvf-input-code, input[name=code]";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -64,8 +71,12 @@ export class NowLogin {
       await clickAndSettle(page, page.locator("input#continue, input[type=submit]").first());
       await this.reachOtp(page, channel);
       this.pending = { b, phone: digits };
-      const sentVia: OtpChannel = /Verify with WhatsApp/i.test(await pageText(page)) ? "whatsapp" : "sms";
-      return { otpSent: true as const, channel: sentVia, to: maskPhone(digits) };
+      const sentVia = otpSentVia(await pageText(page));
+      const note =
+        channel === "sms" && sentVia === "whatsapp"
+          ? "Amazon sent the code to WhatsApp; no SMS option was offered"
+          : undefined;
+      return { otpSent: true as const, channel: sentVia, to: maskPhone(digits), ...(note ? { note } : {}) };
     } catch (e) {
       await b.discard();
       throw e;
@@ -74,12 +85,19 @@ export class NowLogin {
 
   /** Walk from the screen after the phone number to the OTP entry form, asking for an OTP on the way. */
   private async reachOtp(page: Page, channel: OtpChannel): Promise<void> {
+    let switched = false; // switch channel at most once, so a missed switch can't keep sending codes
     for (let step = 0; step < 6; step++) {
       const text = await pageText(page);
       if (await visible(page, OTP_INPUT)) {
-        const sms = page.getByText(/Send OTP by SMS/i).first();
-        if (channel === "sms" && /WhatsApp/i.test(text) && (await sms.isVisible().catch(() => false))) {
-          await clickAndSettle(page, sms);
+        const sentVia = otpSentVia(text);
+        const wrong = channel === "sms" ? /WhatsApp/i.test(text) && sentVia !== "sms" : sentVia !== "whatsapp";
+        const other = page
+          .locator("a, button, input[type=submit], span[role=button]")
+          .filter({ hasText: channel === "sms" ? /\b(SMS|text message)\b/i : /\bWhatsApp\b/i })
+          .filter({ visible: true });
+        if (!switched && wrong && (await other.count())) {
+          switched = true;
+          await clickAndSettle(page, other.first());
           continue;
         }
         return;

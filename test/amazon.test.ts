@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { AmazonNow } from "../src/amazon/client.js";
 import { type BrowserCookie, parseNetscape, readCookies, toNetscape, writeCookies } from "../src/amazon/cookies.js";
+import { otpSentVia } from "../src/amazon/login.js";
 import {
   parseAddresses,
   parseBill,
@@ -398,5 +399,15 @@ describe("Amazon Now QR expiry", () => {
     const intent = "upi://pay?pa=amazonpaygrocery%40apl&am=247.00&QRexpire=2026-10-27T12:53:46.04695114+05:30";
     expect(upiExpiry(intent)).toBe(Date.parse("2026-10-27T07:23:46.046Z"));
     expect(upiExpiry("upi://pay?pa=x@y&am=1")).toBeNull();
+  });
+});
+
+describe("Amazon OTP channel", () => {
+  it("reads where the OTP screen says the code went", () => {
+    expect(otpSentVia("We've sent a code to your WhatsApp")).toBe("whatsapp");
+    expect(otpSentVia("Enter the WhatsApp code we sent. Verify with WhatsApp")).toBe("whatsapp");
+    expect(otpSentVia("We've sent a One Time Password (OTP) to the mobile number")).toBe("sms");
+    expect(otpSentVia("Enter the SMS code sent to +91 ******1234")).toBe("sms");
+    expect(otpSentVia("Enter the code")).toBe("unknown");
   });
 });
