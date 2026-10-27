@@ -91,7 +91,8 @@ describe("Amazon cookie file", () => {
   it("is written owner-readable only", () => {
     const file = join(mkdtempSync(join(tmpdir(), "anow-")), "amazon-now.cookies");
     writeCookies(file, cookies);
-    expect(statSync(file).mode & 0o777).toBe(0o600);
+    // Windows has no POSIX permission bits (Node reports 0o666), so the mode is only checkable elsewhere.
+    if (process.platform !== "win32") expect(statSync(file).mode & 0o777).toBe(0o600);
     expect(readCookies(file).map((c) => c.name)).toEqual(["at-acbin", "csm-hit"]);
     expect(new NowSession(file).loggedIn).toBe(true);
   });
