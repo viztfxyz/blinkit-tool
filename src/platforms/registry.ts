@@ -66,10 +66,12 @@ export interface Platform {
   pay?(opts: PayOptions): Promise<PayStatus>;
   /**
    * Pay runs detached so it outlives the MCP server: the environment that points the child at this
-   * same session, and the status file the child writes. Both are needed wherever `pay` is.
+   * same session, and the status file the child writes (its path also names the run's lock). All are
+   * needed wherever `pay` is.
    */
   payEnv?(): Record<string, string>;
   payStatus?(): PayStatus;
+  payStatusFile?(): string;
   // optional, Blinkit today
   categories?(): Promise<CategoryGroup[]>;
   findCategory?(name: string): Promise<CategoryMatch>;
@@ -89,7 +91,7 @@ export interface PlatformDescriptor {
 /** Which members a declared capability promises, so a descriptor can't lie about what it supports. */
 const REQUIRED_MEMBERS: Partial<Record<Capability, (keyof Platform)[]>> = {
   orders: ["orders"],
-  pay: ["pay", "payEnv", "payStatus"],
+  pay: ["pay", "payEnv", "payStatus", "payStatusFile"],
   categories: ["categories", "findCategory"],
   browse: ["browse"],
   locate: ["locate", "setLocation"],

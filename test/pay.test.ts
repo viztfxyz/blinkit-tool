@@ -4,6 +4,7 @@ import { join } from "node:path";
 import QRCode from "qrcode";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HandcartError } from "../src/core/errors.js";
+import { isPaidUrl } from "../src/pay/browser.js";
 import { handOff, payPageTtlSec, qrbatonOrder, qrbatonStatusFor } from "../src/pay/handoff.js";
 import { decodeQrPng, extractUpiIntent, upiIntentFromCapture } from "../src/pay/qr.js";
 import {
@@ -277,6 +278,22 @@ describe("handoff", () => {
     expect(qrbatonStatusFor("error")).toBe("expired");
     expect(qrbatonStatusFor("qr_ready")).toBeNull();
     expect(qrbatonStatusFor("dry_run_ok")).toBeNull();
+    // Maybe paid: the pay page must not be told paid or expired.
+    expect(qrbatonStatusFor("unknown")).toBeNull();
+  });
+});
+
+describe("browser pay outcome", () => {
+  it("counts only an explicit blinkit.com success page as paid", () => {
+    expect(isPaidUrl("https://blinkit.com/checkout/success")).toBe(true);
+    expect(isPaidUrl("https://blinkit.com/checkout/success/123?x=1")).toBe(true);
+    // Leaving checkout proves nothing.
+    expect(isPaidUrl("https://blinkit.com/")).toBe(false);
+    expect(isPaidUrl("https://blinkit.com/zpay/42")).toBe(false);
+    expect(isPaidUrl("https://blinkit.com/cn/success-stories")).toBe(false);
+    expect(isPaidUrl("https://blinkit.com/checkout/failure?reason=success")).toBe(false);
+    expect(isPaidUrl("https://evil.example/checkout/success")).toBe(false);
+    expect(isPaidUrl("about:blank")).toBe(false);
   });
 });
 

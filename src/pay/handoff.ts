@@ -187,6 +187,8 @@ export function qrbatonStatusFor(stage: PayStage): QrbatonStatus | null {
     case "launching":
     case "qr_ready":
     case "dry_run_ok":
+    // Maybe paid: the page must say neither paid nor expired.
+    case "unknown":
       return null;
     default: {
       const _exhaustive: never = stage;

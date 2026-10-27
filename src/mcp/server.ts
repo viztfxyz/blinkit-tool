@@ -2,7 +2,7 @@
  * The MCP stdio server. Every platform's tools are generated from the registry as `<platform>_<verb>`,
  * alongside the handcart-level fan-out tools, so a new store needs no edit here.
  */
-import { spawn } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -13,7 +13,8 @@ import { VERSION } from "../core/config.js";
 import { HandcartError } from "../core/errors.js";
 import type { Order, Product, SearchOptions, Tagged } from "../core/types.js";
 import { SORTS } from "../core/types.js";
-import { HANDOFFS, type Handoff, type PayStatus } from "../pay/index.js";
+import { HANDOFFS, type Handoff, type PayStatus, readPayStatus } from "../pay/index.js";
+import { claimPayLock, payBusy, payLockFile, payLockTtlMs, readPayLock, releasePayLock } from "../pay/lock.js";
 import {
   can,
   client,
@@ -68,6 +69,12 @@ const byNewest = (a: Order, b: Order) => (Date.parse(b.placedAt ?? "") || 0) - (
 
 const tag = <T>(results: { platform: string; value: T[] }[]): Tagged<T>[] =>
   results.flatMap(({ platform, value }) => value.map((item) => ({ ...item, platform })));
+
+/** A pay child this server spawned: when, and how it ended (signal, exit code or spawn error) once it has. */
+interface PayRun {
+  startedAt: number;
+  exit?: string;
+}
 
 /** The CLI entry the detached `pay` child runs; .ts under tsx, .js from dist. */
 const payBin = () =>
@@ -149,7 +156,7 @@ function registerPlatformTools(server: McpServer, d: PlatformDescriptor): void {
   const id = (verb: string) => `${d.name}_${verb}`;
   const L = d.label;
   /** Set when this process started a pay run, so a status file left by an earlier run isn't reported as this one. */
-  let payStartedAt = 0;
+  let payRun: PayRun | undefined;
 
   server.registerTool(
     id("session"),
@@ -336,6 +343,14 @@ function registerPlatformTools(server: McpServer, d: PlatformDescriptor): void {
           agent?: string;
           openPage?: boolean;
         }) => {
+          const file = p().payStatusFile?.();
+          if (!file) throw new HandcartError(`${L} has no pay status file`);
+          const lockFile = payLockFile(file);
+          const refuseIfBusy = () => {
+            const why = payBusy(readPayStatus(file), readPayLock(lockFile));
+            if (why) throw new HandcartError(`${why}; not starting another payment. Poll ${id("pay_status")} instead`);
+          };
+          refuseIfBusy();
           const toPay = (await p().checkout()).total;
           if (Math.round(confirmAmount * 100) !== Math.round(toPay * 100)) {
             throw new HandcartError(
@@ -346,11 +361,33 @@ function registerPlatformTools(server: McpServer, d: PlatformDescriptor): void {
           const args = [payBin(), d.name, "pay", "--confirm", String(toPay), "--handoff", handoff];
           if (agent) args.push("--agent", agent);
           if (!openPage) args.push("--no-open");
-          payStartedAt = Date.now();
-          const child = spawn(process.execPath, [...process.execArgv, ...args], {
-            detached: true,
-            stdio: "ignore",
-            env: { ...process.env, ...p().payEnv?.() },
+          // Synchronous from the re-check to the spawn, so two calls can't both get through. The lock is
+          // held in this server's name until the child takes it over.
+          refuseIfBusy();
+          if (!claimPayLock(lockFile, process.pid, payLockTtlMs())) {
+            throw new HandcartError(`a payment is already in progress; poll ${id("pay_status")} instead`);
+          }
+          const run: PayRun = { startedAt: Date.now() };
+          payRun = run;
+          let child: ChildProcess;
+          try {
+            child = spawn(process.execPath, [...process.execArgv, ...args], {
+              detached: true,
+              stdio: "ignore",
+              env: { ...process.env, ...p().payEnv?.() },
+            });
+          } catch (e) {
+            releasePayLock(lockFile, process.pid);
+            throw e;
+          }
+          // Whatever the child dies of, the lock must not outlive it in this server's name.
+          child.once("exit", (code, signal) => {
+            run.exit = signal ?? `exit code ${code}`;
+            releasePayLock(lockFile, process.pid);
+          });
+          child.once("error", (e) => {
+            run.exit = e.message;
+            releasePayLock(lockFile, process.pid);
           });
           child.unref();
           return {
@@ -364,12 +401,16 @@ function registerPlatformTools(server: McpServer, d: PlatformDescriptor): void {
     server.registerTool(
       id("pay_status"),
       {
-        description: `Status of the last ${id("pay")}. Stages: starting | launching | qr_ready | paid | failed | timeout | browser_closed | error. On qr_ready: payLink (send it to the user) when handoff is qrbaton; otherwise the UPI QR is attached as an image (send that). qrExpiresAt: when the QR (and pay page) stops accepting payment, epoch ms; tell the payer how long they have. warning: something degraded, e.g. qrbaton was unavailable so only the QR is available. apiError: why the headless API fell back to the browser.`,
+        description: `Status of the last ${id("pay")}. Stages: starting | launching | qr_ready | paid | failed | timeout | browser_closed | unknown | error. unknown: the run ended without proof of payment; check the order history or the UPI app before paying again. On qr_ready: payLink (send it to the user) when handoff is qrbaton; otherwise the UPI QR is attached as an image (send that). qrExpiresAt: when the QR (and pay page) stops accepting payment, epoch ms; tell the payer how long they have. warning: something degraded, e.g. qrbaton was unavailable so only the QR is available. apiError: why the headless API fell back to the browser.`,
       },
       async () => {
-        const s = p().payStatus?.() ?? ({ stage: "starting", ts: 0 } as PayStatus);
+        let s = p().payStatus?.() ?? ({ stage: "starting", ts: 0 } as PayStatus);
         // The child hasn't written yet: report this run rather than whatever the last one left behind.
-        if (payStartedAt && s.ts < payStartedAt) return ok({ stage: "starting", ts: payStartedAt });
+        if (payRun && s.ts < payRun.startedAt) s = { stage: "starting", ts: payRun.startedAt };
+        // Died without recording why (killed, or crashed before it could write anything).
+        if (payRun?.exit && (s.stage === "starting" || s.stage === "launching")) {
+          s = { ...s, stage: "error", error: `the pay process ended (${payRun.exit}) before finishing` };
+        }
         const result = ok(s);
         if (s.stage === "qr_ready" && !s.payLink && s.qrImage) {
           try {

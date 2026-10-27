@@ -9,6 +9,7 @@ import { HandcartError } from "../core/errors.js";
 import type { Cart, Location, Order, Product, SearchOptions, Sort, Tagged } from "../core/types.js";
 import { SORTS } from "../core/types.js";
 import { HANDOFFS, type Handoff } from "../pay/index.js";
+import { payExclusively } from "../pay/lock.js";
 import {
   can,
   client,
@@ -380,7 +381,8 @@ function registerPlatform(d: PlatformDescriptor): void {
       .option("--browser", "drive the store's site in Chromium instead of its HTTP API (where supported)")
       .option("--no-open", "don't open the link / QR locally; just print it (agent handoff)")
       .action(async (o) => {
-        const r = await p().pay?.({
+        const pl = p();
+        const opts = {
           confirmAmount: o.confirm,
           timeoutSec: o.timeout,
           dryRun: o.dryRun,
@@ -388,13 +390,18 @@ function registerPlatform(d: PlatformDescriptor): void {
           handoff: o.handoff as Handoff,
           agent: o.agent,
           openPage: o.open,
-        });
+        };
+        const file = pl.payStatusFile?.();
+        const r = file
+          ? await payExclusively(file, d.label, async () => pl.pay?.(opts), o.timeout)
+          : await pl.pay?.(opts);
         if (!r) return;
         const msg: Record<string, string> = {
           paid: "Payment done, order placed.",
           failed: "Payment failed.",
           timeout: "Timed out waiting for payment.",
           browser_closed: "Browser closed before payment.",
+          unknown: "Couldn't confirm the payment; check your orders before paying again.",
           dry_run_ok: "Dry run OK.",
           qr_ready: "UPI QR ready.",
         };

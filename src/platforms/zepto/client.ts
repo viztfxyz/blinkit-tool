@@ -1,4 +1,5 @@
 import { HandcartError } from "../../core/errors.js";
+import { indianMobile, maskPhone } from "../../core/phone.js";
 import { readJson, writeJson } from "../../core/storage.js";
 import type { Json } from "../../core/types.js";
 import { ZEPTO_BASE, zeptoPaths } from "./config.js";
@@ -78,8 +79,8 @@ export class Zepto {
 
   /** Send a login OTP by SMS to an Indian mobile number. */
   async requestOtp(phone: string): Promise<{ sent: true; to: string }> {
-    const mobileNumber = phone.replace(/\D/g, "").replace(/^(91|0)(?=\d{10}$)/, "");
-    if (!/^[6-9]\d{9}$/.test(mobileNumber)) throw new HandcartError("give a 10-digit Indian mobile number");
+    const mobileNumber = indianMobile(phone);
+    if (!mobileNumber) throw new HandcartError("give a 10-digit Indian mobile number");
     await this.session.api("POST", "api/v1/user/customer/send-otp-sms/", {
       json: { mobileNumber, countryCode: "+91" },
     });
@@ -107,7 +108,11 @@ export class Zepto {
     if (!this.loggedIn) throw new HandcartError("Zepto accepted the OTP but didn't start a session; try again");
     const { pendingPhone: _, ...rest } = this.state();
     this.save(rest);
-    return { loggedIn: true, phone: r?.user?.mobileNumber ?? st.pendingPhone, name: r?.user?.fullName ?? null };
+    return {
+      loggedIn: true,
+      phone: maskPhone(r?.user?.mobileNumber ?? st.pendingPhone),
+      name: r?.user?.fullName ?? null,
+    };
   }
 
   logout() {

@@ -10,6 +10,8 @@ export type PayStage =
   | "timeout"
   | "browser_closed"
   | "dry_run_ok"
+  /** The run ended without proof either way (e.g. the browser left checkout with no verdict): check the order. */
+  | "unknown"
   | "error";
 
 /** How the payment reaches the payer: a qrbaton pay page (default) or just the UPI QR image. */

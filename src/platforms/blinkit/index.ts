@@ -202,6 +202,10 @@ class BlinkitPlatform implements Platform {
     return readPayStatus(paths.payStatus);
   }
 
+  payStatusFile(): string {
+    return paths.payStatus;
+  }
+
   categories() {
     return this.bk.catalog.categories();
   }

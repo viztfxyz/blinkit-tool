@@ -1,6 +1,7 @@
 import { HandcartError } from "../../core/errors.js";
+import { indianMobile, maskPhone } from "../../core/phone.js";
 import type { CartService } from "./cart.js";
-import { maskPhone, parseAddress } from "./parsing.js";
+import { parseAddress } from "./parsing.js";
 import type { Core } from "./session.js";
 import type { BlinkitAddress, BlinkitCart, Json, SelectedAddress } from "./types.js";
 
@@ -26,8 +27,8 @@ export class Account {
 
   /** Send a login OTP by SMS to a 10-digit Indian mobile number. */
   async requestOtp(phone: string): Promise<{ otpSent: true; message?: string }> {
-    const digits = String(phone).replace(/\D/g, "").slice(-10);
-    if (!/^[6-9]\d{9}$/.test(digits)) throw new HandcartError("phone must be a 10-digit Indian mobile number");
+    const digits = indianMobile(phone);
+    if (!digits) throw new HandcartError("phone must be a 10-digit Indian mobile number");
     const data = await this.core.req("POST", "/v2/accounts/", { form: { user_phone: digits } });
     if (!data.success) throw new HandcartError(data.message || "OTP request rejected");
     this.core.state.pendingPhone = digits;

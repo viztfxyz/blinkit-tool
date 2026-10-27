@@ -237,6 +237,17 @@ describe("parsing", () => {
     expect(payOutcome("FAILED")).toBe("failed");
     expect(payOutcome("PENDING")).toBeNull();
     expect(payOutcome(undefined)).toBeNull();
+    expect(payOutcome("payment_success")).toBe("paid");
+    expect(payOutcome("CHARGED")).toBe("paid");
+  });
+
+  it("never reads a negative or unknown status as paid", () => {
+    for (const s of ["PAYMENT_FAILED", "FAILED_NOT_PAID", "REFUNDED", "EXPIRED"]) {
+      expect(payOutcome(s)).toBe("failed");
+    }
+    for (const s of ["UNPAID", "NOT_PAID", "PAYMENT_NOT_COMPLETED", "INCOMPLETE", "PAYMENT_PENDING", "PAIDISH"]) {
+      expect(payOutcome(s)).toBeNull();
+    }
   });
 });
 
