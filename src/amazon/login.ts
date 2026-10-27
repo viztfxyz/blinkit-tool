@@ -13,6 +13,25 @@ import type { NowSession } from "./session.js";
 export type OtpChannel = "sms" | "whatsapp";
 export const OTP_CHANNELS = ["sms", "whatsapp"] as const satisfies readonly OtpChannel[];
 
+/** Where the OTP screen says the code went; "unknown" when it doesn't say. */
+export function otpSentVia(text: string): OtpChannel | "unknown" {
+  // Drop "get OTP on WhatsApp instead"-style offers so only the "we've sent…" sentence decides.
+  text = text.replace(
+    /(get|send|receive|resend)\s+(an?\s+)?(otp|code)\s+(on|via|by|through)\s+(whatsapp|sms|text message)(\s+instead)?/gi,
+    " ",
+  );
+  if (/Verify with SMS/i.test(text)) return "sms";
+  if (/Verify with WhatsApp/i.test(text)) return "whatsapp";
+  if (/sent.{0,60}WhatsApp|WhatsApp.{0,40}(code|OTP)|Verify with WhatsApp/i.test(text)) return "whatsapp";
+  if (/sent.{0,60}(SMS|text message|mobile number|phone|\+\d)|\bSMS\b.{0,40}(code|OTP)/i.test(text)) return "sms";
+  return "unknown";
+}
+
+/** Whether the OTP screen says the code was sent, and where. */
+export function otpOutcome(text: string): { otpSent: boolean; channel: OtpChannel | "unknown" } {
+  return { otpSent: !/couldn.?t send an OTP|unable to send|try again later/i.test(text), channel: otpSentVia(text) };
+}
+
 const OTP_INPUT = "#ap_otp_code, input[name=otpCode], #cvf-input-code, input[name=code]";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -49,12 +68,27 @@ export class NowLogin {
       await page.goto(NOW_SIGNIN, { waitUntil: "domcontentloaded" });
       const id = page.locator("#ap_email_login, #ap_email").first();
       await id.waitFor({ state: "visible", timeout: 20000 });
-      await id.fill(digits);
+      await id.click();
+      await id.fill("");
+      await id.pressSequentially(`+91${digits}`, { delay: 80 });
+      // Amazon's unified claim page (/ax/claim) leaves the hidden countryCode empty when headless; set it so the number validates.
+      await page
+        .evaluate(() => {
+          const cc = document.querySelector<HTMLInputElement>("input[name=countryCode]");
+          if (cc && !cc.value) cc.value = "IN";
+        })
+        .catch(() => undefined);
+      await id.blur();
+      await sleep(800);
       await clickAndSettle(page, page.locator("input#continue, input[type=submit]").first());
       await this.reachOtp(page, channel);
+      const r = otpOutcome(await pageText(page));
+      if (!r.otpSent) {
+        await b.discard();
+        return { ...r, error: "Amazon couldn't send the OTP", to: maskPhone(digits) };
+      }
       this.pending = { b, phone: digits };
-      const sentVia: OtpChannel = /Verify with WhatsApp/i.test(await pageText(page)) ? "whatsapp" : "sms";
-      return { otpSent: true as const, channel: sentVia, to: maskPhone(digits) };
+      return { ...r, to: maskPhone(digits) };
     } catch (e) {
       await b.discard();
       throw e;
@@ -63,12 +97,19 @@ export class NowLogin {
 
   /** Walk from the screen after the phone number to the OTP entry form, asking for an OTP on the way. */
   private async reachOtp(page: Page, channel: OtpChannel): Promise<void> {
+    let switched = false; // switch channel at most once, so a missed switch can't keep sending codes
     for (let step = 0; step < 6; step++) {
       const text = await pageText(page);
       if (await visible(page, OTP_INPUT)) {
-        const sms = page.getByText(/Send OTP by SMS/i).first();
-        if (channel === "sms" && /WhatsApp/i.test(text) && (await sms.isVisible().catch(() => false))) {
-          await clickAndSettle(page, sms);
+        const sentVia = otpSentVia(text);
+        const wrong = channel === "sms" ? /WhatsApp/i.test(text) && sentVia !== "sms" : sentVia !== "whatsapp";
+        const other = page
+          .locator("a, button, span[role=button]")
+          .filter({ hasText: channel === "sms" ? /\b(SMS|text message)\b/i : /\bWhatsApp\b/i })
+          .filter({ visible: true });
+        if (!switched && wrong && (await other.count())) {
+          switched = true;
+          await clickAndSettle(page, other.first());
           continue;
         }
         return;
@@ -78,7 +119,10 @@ export class NowLogin {
           `Amazon wants a captcha before sending the OTP; try again later (${await snapshot(page)})`,
         );
       }
-      if (/new to Amazon|create (your )?account/i.test(text) && !/Sign in another way/i.test(text)) {
+      if (
+        /looks like you.?re new to Amazon|no account found|cannot find an account/i.test(text) ||
+        page.url().includes("/ap/register")
+      ) {
         throw new BlinkitError("there is no Amazon account for this number");
       }
       // "Use your passkey" → the full list of sign-in methods. Headless Chromium has no passkey, so
@@ -99,7 +143,9 @@ export class NowLogin {
         await clickAndSettle(page, otp.first());
         continue;
       }
-      const errors = page.locator("#auth-error-message-box, .a-alert-error").filter({ visible: true });
+      const errors = page
+        .locator("#auth-error-message-box, .a-alert-error, .a-alert-inline-error")
+        .filter({ visible: true });
       const error = (await errors.allInnerTexts().catch(() => [])).join(" ").replace(/\s+/g, " ").trim();
       if (error && !/passkey/i.test(error)) throw new BlinkitError(`Amazon: ${error}`);
       if (await visible(page, "#ap_password")) {

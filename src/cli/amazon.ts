@@ -100,7 +100,13 @@ export function registerAmazon(program: Command): void {
     .addOption(new Option("--via <channel>", "where Amazon sends the OTP").choices(OTP_CHANNELS).default("sms"))
     .action(async (phone, o) => {
       const r = await now().requestOtp(phone, o.via as OtpChannel);
-      console.log(`OTP sent by ${r.channel === "whatsapp" ? "WhatsApp" : "SMS"} to ${r.to}.`);
+      const name = { whatsapp: "WhatsApp", sms: "SMS", unknown: "" }[r.channel];
+      if (!r.otpSent) {
+        console.log(`Amazon couldn't send the OTP${name ? ` (${name})` : ""}. Try again later or use --via whatsapp`);
+        process.exitCode = 1;
+        return;
+      }
+      console.log(`OTP sent${name ? ` by ${name}` : ""} to ${r.to}.`);
       const rl = createInterface({ input: process.stdin, output: process.stdout });
       try {
         for (;;) {

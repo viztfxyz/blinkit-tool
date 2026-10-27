@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { AmazonNow } from "../src/amazon/client.js";
 import { type BrowserCookie, parseNetscape, readCookies, toNetscape, writeCookies } from "../src/amazon/cookies.js";
+import { otpOutcome, otpSentVia } from "../src/amazon/login.js";
 import {
   parseAddresses,
   parseBill,
@@ -90,7 +91,8 @@ describe("Amazon cookie file", () => {
   it("is written owner-readable only", () => {
     const file = join(mkdtempSync(join(tmpdir(), "anow-")), "amazon-now.cookies");
     writeCookies(file, cookies);
-    expect(statSync(file).mode & 0o777).toBe(0o600);
+    // Windows has no POSIX permission bits (Node reports 0o666), so the mode is only checkable elsewhere.
+    if (process.platform !== "win32") expect(statSync(file).mode & 0o777).toBe(0o600);
     expect(readCookies(file).map((c) => c.name)).toEqual(["at-acbin", "csm-hit"]);
     expect(new NowSession(file).loggedIn).toBe(true);
   });
@@ -398,5 +400,29 @@ describe("Amazon Now QR expiry", () => {
     const intent = "upi://pay?pa=amazonpaygrocery%40apl&am=247.00&QRexpire=2026-10-27T12:53:46.04695114+05:30";
     expect(upiExpiry(intent)).toBe(Date.parse("2026-10-27T07:23:46.046Z"));
     expect(upiExpiry("upi://pay?pa=x@y&am=1")).toBeNull();
+  });
+});
+
+describe("Amazon OTP channel", () => {
+  it("reads where the OTP screen says the code went", () => {
+    expect(otpSentVia("We've sent a code to your WhatsApp")).toBe("whatsapp");
+    expect(otpSentVia("Enter the WhatsApp code we sent. Verify with WhatsApp")).toBe("whatsapp");
+    expect(otpSentVia("We've sent a One Time Password (OTP) to the mobile number")).toBe("sms");
+    expect(otpSentVia("Enter the SMS code sent to +91 ******1234")).toBe("sms");
+    expect(otpSentVia("We've sent an OTP to +91 ******0055 Enter OTP Resend OTP Get OTP on WhatsApp instead")).toBe(
+      "sms",
+    );
+    expect(otpSentVia("We sent a code to your phone via SMS. Send code via WhatsApp")).toBe("sms");
+    expect(otpSentVia("Enter the code")).toBe("unknown");
+  });
+
+  it("reports when Amazon couldn't send the OTP", () => {
+    const page =
+      "Verify with SMS +91 ***-***-12 Change Enter the OTP we sent you on +91 ***-***-12. Enter OTP Resend OTP Verify or Send OTP to WhatsApp +91 ***-***-12 Sign in another way";
+    expect(otpOutcome(`We couldn't send an OTP. Please try again. ${page}`)).toEqual({
+      otpSent: false,
+      channel: "sms",
+    });
+    expect(otpOutcome(page)).toEqual({ otpSent: true, channel: "sms" });
   });
 });
