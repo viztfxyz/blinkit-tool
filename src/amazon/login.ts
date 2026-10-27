@@ -22,7 +22,7 @@ export function otpSentVia(text: string): OtpChannel | "unknown" {
   );
   if (/Verify with SMS/i.test(text)) return "sms";
   if (/Verify with WhatsApp/i.test(text)) return "whatsapp";
-  if (/sent.{0,60}WhatsApp|WhatsApp.{0,40}(code|OTP)|Verify with WhatsApp/i.test(text)) return "whatsapp";
+  if (/sent.{0,60}WhatsApp|WhatsApp.{0,40}(code|OTP)/i.test(text)) return "whatsapp";
   if (/sent.{0,60}(SMS|text message|mobile number|phone|\+\d)|\bSMS\b.{0,40}(code|OTP)/i.test(text)) return "sms";
   return "unknown";
 }
@@ -32,9 +32,7 @@ const NOT_SENT = /couldn.?t send an OTP|unable to send|try again later/i;
 /** Amazon's "We couldn't send an OTP", as an error that says what to do. */
 export function otpNotSent(channel: OtpChannel): BlinkitError {
   const other = channel === "whatsapp" ? "sms" : "whatsapp";
-  return new BlinkitError(`Amazon couldn't send the OTP; wait a few minutes or use --via ${other}`, {
-    fix: `wait a few minutes, then run \`blinkit amazon login <phone> --via ${other}\``,
-  });
+  return new BlinkitError(`Amazon couldn't send the OTP; wait a few minutes or use --via ${other}`);
 }
 
 /** Whether the OTP screen says the code was sent, and where. */

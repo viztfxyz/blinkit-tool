@@ -5,7 +5,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { AmazonNow } from "../amazon/client.js";
 import { OTP_CHANNELS, type OtpChannel } from "../amazon/login.js";
-import { billProblem, problemFix, readNowPayStatus } from "../amazon/pay.js";
+import { billProblem, readNowPayStatus } from "../amazon/pay.js";
 import { BlinkitError } from "../core/errors.js";
 import { HANDOFFS, type Handoff } from "../pay/status.js";
 import { ok, tool } from "./tools.js";
@@ -134,7 +134,7 @@ export function registerAmazonTools(server: McpServer, now = new AmazonNow()): v
     tool(async (a: { confirmAmount: number; handoff: Handoff; agent?: string; openPage?: boolean }) => {
       const bill = await now.checkout();
       const problem = billProblem(bill, a.confirmAmount);
-      if (problem) throw new BlinkitError(problem, { fix: problemFix(problem) });
+      if (problem) throw new BlinkitError(problem);
       const bin = import.meta.url.endsWith(".ts") ? "../bin/blinkit.ts" : "../bin/blinkit.js";
       const args = [fileURLToPath(new URL(bin, import.meta.url)), "amazon", "pay", "--confirm", String(bill.total)];
       args.push("--handoff", a.handoff);

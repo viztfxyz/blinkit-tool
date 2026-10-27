@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Blinkit } from "../client.js";
-import { ensureBrowser } from "../core/browser.js";
+import { requireBrowser } from "../core/browser.js";
 import { BASE, paths } from "../core/config.js";
 import { BlinkitError } from "../core/errors.js";
 import { confirmedCheckout, type PayOptions, PayRun } from "./flow.js";
@@ -100,7 +100,7 @@ export async function payViaBrowser(bk: Blinkit, opts: PayOptions, apiError?: st
   const a = state.address;
   const accessToken = state.accessToken;
   if (!a || !accessToken) throw new BlinkitError("pay needs login and a saved address");
-  const executablePath = await ensureBrowser({ headed: true });
+  const executablePath = await requireBrowser();
   const { chromium } = await import("playwright-core");
   const run = new PayRun(bk, opts, toPay, apiError);
   const { log } = run;
@@ -234,12 +234,10 @@ export async function payViaBrowser(bk: Blinkit, opts: PayOptions, apiError?: st
     }
     return run.finish("timeout");
   } catch (e) {
-    const msg = e instanceof BlinkitError ? e.reason : (e instanceof Error ? e.message : String(e)).split("\n")[0];
+    const msg = (e instanceof Error ? e.message : String(e)).split("\n")[0];
     await page.screenshot({ path: paths.payErrorShot }).catch(() => undefined);
     await run.finish("error", { error: msg, screenshot: paths.payErrorShot });
-    throw new BlinkitError(`${msg} (screenshot: ${paths.payErrorShot})`, {
-      fix: e instanceof BlinkitError ? e.fix : undefined,
-    });
+    throw new BlinkitError(`${msg} (screenshot: ${paths.payErrorShot})`);
   } finally {
     await page.waitForTimeout(2000).catch(() => undefined);
     await browser.close();

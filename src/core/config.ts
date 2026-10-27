@@ -31,8 +31,6 @@ const CONFIG_DIR = join(homedir(), ".config", "blinkit-tool");
 
 export const paths = {
   session: process.env.BLINKIT_SESSION ?? join(CONFIG_DIR, "session.json"),
-  /** Settings found once and reused, such as the browser path. */
-  config: process.env.BLINKIT_CONFIG ?? join(CONFIG_DIR, "config.json"),
   locations: join(CACHE_DIR, "locations.json"),
   categories: join(CACHE_DIR, "categories.json"),
   payStatus: join(CACHE_DIR, "pay_status.json"),

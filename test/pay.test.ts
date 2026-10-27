@@ -78,8 +78,8 @@ describe("prepareOrder HTTP errors", () => {
     const err = await prepareOrder(bk, "99").catch((e: unknown) => e);
     expect(err).toBeInstanceOf(BlinkitError);
     const prefix = "GET /createOrder/99 failed (HTTP 500): ";
-    expect((err as BlinkitError).reason.startsWith(prefix)).toBe(true);
-    expect((err as BlinkitError).reason.slice(prefix.length)).toBe(body.slice(0, 200));
+    expect((err as BlinkitError).message.startsWith(prefix)).toBe(true);
+    expect((err as BlinkitError).message.slice(prefix.length)).toBe(body.slice(0, 200));
   });
 
   it("names POST /zomato_payment_hash when that call fails", async () => {
