@@ -16,7 +16,7 @@ import { signRequest } from "../src/platforms/zepto/sign.js";
 // Trimmed from live zepto.com responses (2026-10-27).
 const SP = "cefcb206-1da2-4cc0-925d-f1d4af3316e9";
 const PV = "9d447ba5-1d35-46e1-bc64-e932135d026f";
-const STORE = "46b54f69-c5ff-4595-934d-3d98fbf33ec0";
+const STORE = "00000000-0000-4000-8000-000000000001";
 
 const variant = {
   id: PV,
@@ -26,7 +26,7 @@ const variant = {
 };
 
 const cartResponse = (over: Json = {}): Json => ({
-  cartId: "f22a5d45-4561-5b8c-bc86-98b760ccf0d4",
+  cartId: "00000000-0000-4000-8000-000000000002",
   storeId: STORE,
   grandTotalAmount: 5800,
   toPay: 5800,
@@ -46,7 +46,7 @@ const cartResponse = (over: Json = {}): Json => ({
     { type: "PACKAGING_FEE", title: "Handling Fee", amount: 0, amountPreDiscount: 1000 },
     { type: "DELIVERY_FEE", title: "Delivery Fee ", amount: 0, amountPreDiscount: 3000 },
   ],
-  userAddress: { displayText: "Stanza Living Portland House, Gota, Ahmedabad" },
+  userAddress: { displayText: "Flat 1, Test Road, Bengaluru" },
   storeLevelCartProducts: [
     {
       storeId: STORE,
@@ -100,18 +100,17 @@ const listing = (over: Json = {}): Json => ({
 });
 
 describe("request signature", () => {
-  it("matches what zepto.com's web app sent", () => {
-    // A real GET captured from the browser.
+  it("signs a GET", () => {
     const h = signRequest({
       method: "GET",
-      url: "https://bff-gateway.zepto.com/lms/api/v2/get_page?latitude=12.96902&longitude=77.75395&page_type=HOME&version=v2&show_new_eta_banner=true&page_size=3&enforce_platform_type=DESKTOP",
-      requestId: "bd6a05b3-bb5a-4b96-a980-bde3a910c11e",
-      deviceId: "f4abbaaf-010b-4845-ae80-ad2f4f37c780",
-      secret: "vT1PLhR5hpQZ9ZqINFPHi:4oAitWRA--iIYRMIOOtG25GcxZE.w/A3Q+7vRY6fU5HPaOr7pceBXeXtNsroCe4m0U0dVNE",
+      url: "https://bff-gateway.zepto.com/lms/api/v2/get_page?latitude=12.97&longitude=77.59&page_type=HOME&version=v2&show_new_eta_banner=true&page_size=3&enforce_platform_type=DESKTOP",
+      requestId: "00000000-0000-4000-8000-000000000004",
+      deviceId: "test-device",
+      secret: "test-secret",
     });
     expect(h).toEqual({
-      "request-signature": "c44f449d2bab3e885f508738c8de95f7e9461be0efb6787f2e7f7f6e1215286a",
-      "x-timezone": "f590b439594753979ef89fb77842a1b652968f4cd6ad66aeccfe06650b0d53e8",
+      "request-signature": "8ece34ff523e56ccb55bbeb1721c73dc26af8ee2d7cd30a3d18ade24b3f13275",
+      "x-timezone": "c5ecb2b272ff02a6c83f71175ed1a950c7819f2032f5a74aeb5a18aec3b92bef",
     });
   });
 
@@ -203,12 +202,12 @@ describe("parsing", () => {
 
   it("picks the first address until one is chosen", () => {
     const list = [
-      { id: "a1", name: "bhavya", type: "OTHER", displayText: "Stanza Living", latitude: 23.1, longitude: 72.5 },
-      { id: "a2", name: "", type: "HOME", displayText: "Home st", latitude: 1, longitude: 2 },
+      { id: "a1", name: "home", type: "OTHER", displayText: "Flat 1, Test Rd", latitude: 12.97, longitude: 77.59 },
+      { id: "a2", name: "", type: "WORK", displayText: "Flat 2, Test Rd", latitude: 1, longitude: 2 },
     ];
     expect(parseAddresses(list, undefined).map((a) => [a.label, a.selected])).toEqual([
-      ["bhavya", true],
-      ["home", false],
+      ["home", true],
+      ["work", false],
     ]);
     expect(parseAddresses(list, "a2").map((a) => a.selected)).toEqual([false, true]);
     expect(parseAddresses(list, "gone").map((a) => a.selected)).toEqual([true, false]);
@@ -216,7 +215,7 @@ describe("parsing", () => {
 
   it("reads order history", () => {
     const o = {
-      id: "01a17d1a-9145-7417-8702-3a0c2b1df618",
+      id: "00000000-0000-4000-8000-000000000003",
       status: "CANCELLED",
       formattedStatus: "CANCELLED",
       grandTotalAmount: 5500,
@@ -224,7 +223,7 @@ describe("parsing", () => {
       productsNamesAndCounts: [{ name: "Amul Masti Dahi Cup", count: 1, productVariantId: PV }],
     };
     expect(parseOrder(o)).toEqual({
-      orderId: "01a17d1a-9145-7417-8702-3a0c2b1df618",
+      orderId: "00000000-0000-4000-8000-000000000003",
       status: "CANCELLED",
       amount: 55,
       placedAt: "2026-10-27T11:27:49.785787Z",
@@ -286,8 +285,8 @@ describe("pay", () => {
   const priced = (raw = cartResponse()): PricedCart => ({
     bill: parseBill(raw),
     raw,
-    request: { storeId: STORE, latitude: 23.1, longitude: 72.5, useZeptoCash: false },
-    address: { id: "a1", label: "bhavya", name: null, text: "x", latitude: 23.1, longitude: 72.5, selected: true },
+    request: { storeId: STORE, latitude: 12.97, longitude: 77.59, useZeptoCash: false },
+    address: { id: "a1", label: "home", name: null, text: "x", latitude: 12.97, longitude: 77.59, selected: true },
   });
   const session = (api: (method: string, path: string, opts?: Json) => Promise<Json>) =>
     ({ requireLogin() {}, api: vi.fn(api) }) as unknown as ZeptoSession & { api: ReturnType<typeof vi.fn> };
@@ -333,7 +332,7 @@ describe("pay", () => {
       useZeptoCash: false,
       previousCartDetails: { toPay: 5800 },
       paymentMetadata: UPI_QR,
-      cartId: "f22a5d45-4561-5b8c-bc86-98b760ccf0d4",
+      cartId: "00000000-0000-4000-8000-000000000002",
     });
   });
 });
