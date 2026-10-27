@@ -395,6 +395,7 @@ function registerPlatform(d: PlatformDescriptor): void {
           failed: "Payment failed.",
           timeout: "Timed out waiting for payment.",
           browser_closed: "Browser closed before payment.",
+          unknown: "Couldn't confirm the payment; check your orders before paying again.",
           dry_run_ok: "Dry run OK.",
           qr_ready: "UPI QR ready.",
         };

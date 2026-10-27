@@ -12,6 +12,20 @@ import { BASE, paths } from "../platforms/blinkit/config.js";
 import { confirmedCheckout, type PayOptions, PayRun } from "./flow.js";
 import { type FrameQrCapture, upiIntentFromCapture } from "./qr.js";
 import type { PayStatus } from "./status.js";
+import { type PaymentState, paymentState } from "./zpaykit.js";
+
+/**
+ * An explicit payment-success page on blinkit.com (the counterpart of /checkout/failure). Leaving
+ * checkout for anywhere else proves nothing, so it doesn't count.
+ */
+export function isPaidUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return /(^|\.)blinkit\.com$/.test(u.hostname) && /^\/checkout\/success(\/|$)/.test(u.pathname);
+  } catch {
+    return false;
+  }
+}
 
 /** On Linux, run Chromium on X11 (XWayland on Wayland desktops): Playwright + Wayland can hang. */
 function displayEnv(): { env: Record<string, string>; args: string[] } {
@@ -154,6 +168,17 @@ export async function payViaBrowser(bk: Blinkit, opts: PayOptions, apiError?: st
   const page = await (await browser.newContext({ viewport: { width: 1280, height: 860 } })).newPage();
   mkdirSync(dirname(paths.qrRaw), { recursive: true });
   try {
+    // The zpaykit widget polls verifyPaymentStatus itself; its answer is the best proof the browser gets.
+    const zpay: { verdict: PaymentState } = { verdict: "pending" };
+    page.on("response", (r) => {
+      if (!r.url().includes("/zpaykit/verifyPaymentStatus")) return;
+      r.json()
+        .then((reply) => {
+          const s = paymentState(reply);
+          if (s !== "pending") zpay.verdict = s;
+        })
+        .catch(() => undefined);
+    });
     await page.context().addCookies([{ name: "accessToken", value: accessToken, domain: "blinkit.com", path: "/" }]);
     await page.goto(`${BASE}/robots.txt`);
     await page.evaluate(
@@ -223,12 +248,17 @@ export async function payViaBrowser(bk: Blinkit, opts: PayOptions, apiError?: st
 
     const deadline = Date.now() + (opts.timeoutSec ?? 600) * 1000;
     while (Date.now() < deadline) {
+      if (zpay.verdict === "paid") return run.finish("paid", { url: page.isClosed() ? undefined : page.url() });
+      if (zpay.verdict === "failed") return run.finish("failed");
       if (page.isClosed()) return run.finish("browser_closed");
       const url = page.url();
       if (url.includes("/checkout/failure")) return run.finish("failed", { url });
-      if (!url.includes("/checkout") || url.includes("success")) {
-        await page.waitForTimeout(3000);
-        return run.finish("paid", { url: page.url() });
+      if (isPaidUrl(url)) return run.finish("paid", { url });
+      if (!url.includes("/checkout")) {
+        // Left checkout without a verdict: give zpaykit's status reply a moment, then admit we don't know.
+        await page.waitForTimeout(5000);
+        const stage = { paid: "paid", failed: "failed", pending: "unknown" } as const;
+        return run.finish(stage[zpay.verdict], { url: page.url() });
       }
       await page.waitForTimeout(1500);
     }

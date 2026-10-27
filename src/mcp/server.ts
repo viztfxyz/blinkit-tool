@@ -364,7 +364,7 @@ function registerPlatformTools(server: McpServer, d: PlatformDescriptor): void {
     server.registerTool(
       id("pay_status"),
       {
-        description: `Status of the last ${id("pay")}. Stages: starting | launching | qr_ready | paid | failed | timeout | browser_closed | error. On qr_ready: payLink (send it to the user) when handoff is qrbaton; otherwise the UPI QR is attached as an image (send that). qrExpiresAt: when the QR (and pay page) stops accepting payment, epoch ms; tell the payer how long they have. warning: something degraded, e.g. qrbaton was unavailable so only the QR is available. apiError: why the headless API fell back to the browser.`,
+        description: `Status of the last ${id("pay")}. Stages: starting | launching | qr_ready | paid | failed | timeout | browser_closed | unknown | error. unknown: the run ended without proof of payment; check the order history or the UPI app before paying again. On qr_ready: payLink (send it to the user) when handoff is qrbaton; otherwise the UPI QR is attached as an image (send that). qrExpiresAt: when the QR (and pay page) stops accepting payment, epoch ms; tell the payer how long they have. warning: something degraded, e.g. qrbaton was unavailable so only the QR is available. apiError: why the headless API fell back to the browser.`,
       },
       async () => {
         const s = p().payStatus?.() ?? ({ stage: "starting", ts: 0 } as PayStatus);
