@@ -10,6 +10,8 @@ import {
   qtyEq,
   score,
   THRESHOLD,
+  variantClash,
+  variantWords,
 } from "../src/core/match.js";
 
 let seq = 0;
@@ -73,6 +75,16 @@ describe("parseQty", () => {
   it("skips words that look like units but are not", () => {
     // "1 pack" must not be read as one piece, or "1 pack (500 ml)" would be a count.
     expect(parseQty("1 pack (500 ml)")?.cls).toBe("vol");
+  });
+
+  it("reads the bracketed size after a piece count, not the piece count", () => {
+    expect(parseQty("1 pc (1 L)")).toEqual({ value: 1000, cls: "vol", packs: 1 });
+    expect(parseQty("1 pc (500 ml)")).toEqual({ value: 500, cls: "vol", packs: 1 });
+    expect(parseQty("2 pc (500 ml)")).toEqual({ value: 1000, cls: "vol", packs: 2 });
+    expect(qtyEq(parseQty("1 pc (1 L)"), parseQty("1 ltr"))).toBe(true);
+    // Before, both were "1 piece", so a 2.25 L bottle could group with a 500 ml one.
+    expect(qtyEq(parseQty("1 pc (2.25 L)"), parseQty("1 pc (500 ml)"))).toBe(false);
+    expect(parseQty("6 pcs")).toEqual({ value: 6, cls: "count", packs: 1 });
   });
 
   it("returns null when there is no size anywhere", () => {
@@ -414,32 +426,81 @@ describe("group", () => {
   });
 });
 
-describe("confidence", () => {
-  // A real false positive from the corpus: same brand, same size, same MRP, and the only
-  // difference is which hair problem the bottle claims to fix. It scores in the band just
-  // above the threshold, so it is still shown as one group but flagged, never silently.
-  const dryness = item({
-    platform: "blinkit",
-    name: "Dove Dryness Care Shampoo For Very Dry Hair",
-    brand: "Dove",
-    unit: "650 ml",
-    price: 400,
-    mrp: 435,
+describe("variant clash", () => {
+  const pair = (b: Partial<TaggedProduct> & { name: string }, z: Partial<TaggedProduct> & { name: string }) =>
+    group([item({ platform: "blinkit", ...b }), item({ platform: "zepto", ...z })]);
+
+  it("keeps apart two listings that each name a different variant", () => {
+    const g = pair(
+      {
+        name: "Harpic Disinfectant Liquid Bathroom Cleaner (Lemon - 500 ml)",
+        brand: "Harpic",
+        unit: "500 ml",
+        mrp: 120,
+      },
+      { name: "Harpic Floral Bathroom Cleaner Liquid", brand: "Harpic", unit: "1 pc (500 ml)", mrp: 120 },
+    );
+    expect(g).toHaveLength(2);
   });
-  const dandruff = item({
+
+  it("keeps Dryness Care and Dandruff Care apart", () => {
+    const g = pair(
+      { name: "Dove Dryness Care Shampoo For Very Dry Hair", brand: "Dove", unit: "650 ml", mrp: 435 },
+      { name: "Dove Dandruff Care Shampoo", brand: "Dove", unit: "650 ml", mrp: 435 },
+    );
+    expect(g).toHaveLength(2);
+  });
+
+  it("does not treat a one-sided variant word as a clash", () => {
+    expect(variantClash(variantWords("Amul Gold Milk"), variantWords("Amul Gold Homogenised Toned Milk"))).toBe(false);
+  });
+
+  it("reads the variant inside brackets, and keeps a colour that is also in the brand", () => {
+    expect(variantWords("Harpic Hygienic Toilet Cleaner Block (Citrus)", "Harpic")).toEqual(new Set(["citrus"]));
+    expect(variantWords("Red Bull Drink - The Red Edition", "Red Bull")).toEqual(new Set(["red"]));
+    expect(
+      variantClash(
+        variantWords("Red Bull Drink - The Red Edition", "Red Bull"),
+        variantWords("Red Bull Energy Drink The Pink Edition", "Red Bull"),
+      ),
+    ).toBe(true);
+  });
+
+  it("treats two spellings of one variant as the same", () => {
+    expect(variantClash(variantWords("Sprite Lime Soft Drink"), variantWords("Sprite Lemon Soft Drink"))).toBe(false);
+    expect(variantClash(variantWords("Angur Oiled Toor Dal"), variantWords("ANGUR Toor Dal Oily"))).toBe(false);
+  });
+
+  it("ignores a promotion that reads like a variant", () => {
+    expect(variantWords("Pears Soft & Fresh Soap - Buy 3 Get 1 Free")).toEqual(new Set());
+  });
+});
+
+describe("confidence", () => {
+  // A real near-threshold pair from the corpus: the same toothpaste, named very differently. It
+  // scores above the threshold, so it is shown as one group, but flagged rather than silently merged.
+  const spicy = item({
+    platform: "blinkit",
+    name: "Colgate MaxFresh Spicy Fresh Gel Toothpaste",
+    brand: "Colgate",
+    unit: "150 g",
+    price: 137,
+    mrp: 144,
+  });
+  const redGel = item({
     platform: "zepto",
-    name: "Dove Dandruff Care Shampoo",
-    brand: "Dove",
-    unit: "650 ml",
-    price: 410,
-    mrp: 435,
+    name: "Colgate MaxFresh Toothpaste, Red Gel Paste with Menthol for Super Fresh Breath (Spicy Fresh)",
+    brand: "Colgate",
+    unit: "1 pc (150 g)",
+    price: 137,
+    mrp: 144,
   });
 
   it("marks a near-threshold merge instead of merging it silently", () => {
-    const s = pairScore(dryness, dandruff);
+    const s = pairScore(spicy, redGel);
     expect(s).toBeGreaterThanOrEqual(THRESHOLD);
     expect(s).toBeLessThan(CONFIDENT_FLOOR);
-    const groups = group([dryness, dandruff]);
+    const groups = group([spicy, redGel]);
     expect(groups).toHaveLength(1);
     expect(groups[0].offers).toHaveLength(2);
     expect(groups[0].confident).toBe(false);

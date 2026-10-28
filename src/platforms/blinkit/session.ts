@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { statSync } from "node:fs";
 import { HandcartError } from "../../core/errors.js";
 import { type Method, Transport } from "../../core/http.js";
 import { readJson, writeJson } from "../../core/storage.js";
@@ -19,14 +20,46 @@ export interface ReqOptions {
 /** Shared plumbing: the persisted session, the Blinkit auth key, JSON requests and location. */
 export class Core {
   readonly http = new Transport({ base: BASE, versions: IMPERSONATE_VERSIONS, probe: ZPAYKIT_PROBE });
-  state: SessionState;
+  #state: SessionState;
+  /** Inode and mtime of the session file as this process last read or wrote it. */
+  #seen: string | undefined;
 
   constructor(readonly sessionFile: string = paths.session) {
-    this.state = { deviceId: randomUUID(), cart: {}, ...readJson<Partial<SessionState>>(sessionFile) };
+    this.#state = this.#load();
+  }
+
+  /**
+   * The session, re-read whenever another process has written the file since. The detached pay child
+   * clears the cart after a payment and `handcart blinkit login` replaces the token; without this a
+   * long-running MCP server would keep its old copy and write it back, re-adding bought items.
+   */
+  get state(): SessionState {
+    if (this.#mtime() !== this.#seen) this.#state = this.#load();
+    return this.#state;
+  }
+
+  set state(s: SessionState) {
+    this.#state = s;
   }
 
   save(): void {
-    writeJson(this.sessionFile, this.state, true);
+    writeJson(this.sessionFile, this.#state, true);
+    this.#seen = this.#mtime();
+  }
+
+  #load(): SessionState {
+    this.#seen = this.#mtime();
+    return { deviceId: randomUUID(), cart: {}, ...readJson<Partial<SessionState>>(this.sessionFile) };
+  }
+
+  // Every save is a fresh file renamed into place, so the inode changes even within one millisecond.
+  #mtime(): string | undefined {
+    try {
+      const st = statSync(this.sessionFile);
+      return `${st.ino}:${st.mtimeMs}`;
+    } catch {
+      return undefined;
+    }
   }
 
   get loggedIn(): boolean {
