@@ -1,6 +1,6 @@
 {
   "name": "handcart",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Unofficial multi-platform quick-commerce client (Blinkit + Zepto): search and compare, cart, checkout and UPI pay, as a CLI, library and MCP server",
   "keywords": [
     "handcart",

@@ -4,6 +4,13 @@ All notable changes to this project are documented here. Entries are generated b
 [release-please](https://github.com/googleapis/release-please) from commit messages, and the project uses
 [Semantic Versioning](https://semver.org).
 
+## [0.2.1](https://github.com/viztfxyz/handcart/compare/v0.2.0...v0.2.1) (2026-10-28)
+
+
+### Bug Fixes
+
+* real pack sizes in matching, flavour variants kept apart, Blinkit session reload ([#25](https://github.com/viztfxyz/handcart/issues/25)) ([a381c15](https://github.com/viztfxyz/handcart/commit/a381c15c24dd5326a82b4aec99b32f1d56095478))
+
 ## [0.2.0](https://github.com/viztfxyz/handcart/compare/v0.1.3...v0.2.0) (2026-10-27)
 
 
