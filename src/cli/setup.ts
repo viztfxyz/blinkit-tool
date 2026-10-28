@@ -67,7 +67,7 @@ async function browser(interactive: boolean): Promise<void> {
 
 /** Whether the saved session is still usable, swallowing the reason: the step re-logs in either way. */
 const usable = (d: PlatformDescriptor) =>
-  client(d.name)
+  client(d)
     .whoami()
     .then(
       (w) => (w.loggedIn ? w : undefined),
@@ -76,7 +76,7 @@ const usable = (d: PlatformDescriptor) =>
 
 async function login(d: PlatformDescriptor): Promise<void> {
   todo(`${d.label} login`);
-  const p = client(d.name);
+  const p = client(d);
   const who = await usable(d);
   // whoami can be satisfied by a stale token; addresses() is the call that proves it still works.
   if (
@@ -100,7 +100,7 @@ async function address(d: PlatformDescriptor): Promise<void> {
   if (!who) return; // login was skipped or failed; doctor says so at the end
   todo(`${d.label} delivery address`);
   if (who.deliverTo) return done(`${d.label}: delivering to ${label(who.deliverTo)}`);
-  const p = client(d.name);
+  const p = client(d);
   const served = (await p.addresses()).filter((a) => a.serviceable !== false);
   if (!served.length) {
     return console.log(`No ${d.label} address is deliverable here. Add one in the ${d.label} app.`);

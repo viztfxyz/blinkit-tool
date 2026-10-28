@@ -47,7 +47,7 @@ async function browserCheck({ find = findBrowser, launch = launchHeadless }: Doc
 async function platformCheck(d: PlatformDescriptor): Promise<Check> {
   const name = d.label;
   const fix = `run \`handcart ${d.name} login <phone>\``;
-  const p = client(d.name);
+  const p = client(d);
   let who: Awaited<ReturnType<typeof p.whoami>>;
   try {
     who = await p.whoami();

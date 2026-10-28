@@ -46,3 +46,6 @@ export {
   platforms,
   supporting,
 } from "./platforms/registry.js";
+export { type PricedCart, Zepto } from "./platforms/zepto/client.js";
+export type { ZeptoPayOptions } from "./platforms/zepto/pay.js";
+export type * from "./platforms/zepto/types.js";

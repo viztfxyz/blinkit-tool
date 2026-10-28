@@ -96,7 +96,8 @@ const REQUIRED_MEMBERS: Partial<Record<Capability, (keyof Platform)[]>> = {
 };
 
 const registry = new Map<string, PlatformDescriptor>();
-const live = new Map<string, Platform>();
+/** Keyed by descriptor, not name: a registered descriptor is a singleton, so this caches the same. */
+const live = new WeakMap<PlatformDescriptor, Platform>();
 
 function register(d: PlatformDescriptor): void {
   if (registry.has(d.name)) throw new Error(`platform ${d.name} is registered twice`);
@@ -122,10 +123,14 @@ export const supporting = (c: Capability): PlatformDescriptor[] =>
 
 export const can = (d: PlatformDescriptor, c: Capability): boolean => d.capabilities.includes(c);
 
-/** The platform's client, built once per process. The declared capabilities are checked here. */
-export function client(name: string): Platform {
-  const d = descriptor(name);
-  let p = live.get(d.name);
+/**
+ * The platform's client, built once per process and cached. The declared capabilities are
+ * checked here, where there is finally an instance to check them against. Takes a descriptor as well
+ * as a name so a caller already holding one (doctor, setup) doesn't look it up again.
+ */
+export function client(platform: string | PlatformDescriptor): Platform {
+  const d = typeof platform === "string" ? descriptor(platform) : platform;
+  let p = live.get(d);
   if (!p) {
     p = d.create();
     for (const c of d.capabilities) {
@@ -133,7 +138,7 @@ export function client(name: string): Platform {
         if (typeof p[m] !== "function") throw new Error(`platform ${d.name} declares ${c} but has no ${m}()`);
       }
     }
-    live.set(d.name, p);
+    live.set(d, p);
   }
   return p;
 }
