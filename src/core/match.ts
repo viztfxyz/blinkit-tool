@@ -104,6 +104,17 @@ export function parseQty(...sources: (string | null | undefined)[]): Qty | null 
     }
   }
 
+  // "1 pc (1 L)" / "2 pc (500 ml)": the bracket is the real size. Without this the count unit wins,
+  // and a 2.25 L bottle and a 500 ml one are both just "1 piece".
+  const each = s.match(/(\d+)\s*(?:pcs?|pieces?|units?|packs?)\s*\(\s*(\d+(?:\.\d+)?)\s*([a-z]+)\s*\)/);
+  if (each) {
+    const key = unitKey(each[3]);
+    if (key && TO_BASE[key][1] !== "count") {
+      const [factor, cls] = TO_BASE[key];
+      return { value: Number(each[1]) * Number(each[2]) * factor, cls, packs: Number(each[1]) };
+    }
+  }
+
   for (const m of s.matchAll(/(\d+(?:\.\d+)?)\s*([a-z]+)/g)) {
     const key = unitKey(m[2]);
     if (!key) continue; // e.g. the "1 pack" in "1 pack (500 ml)" — keep looking
@@ -144,6 +155,9 @@ const SYNONYMS = new Map<string, string>(
     tel: "oil",
     arhar: "toor",
     tuver: "toor",
+    oiled: "oily",
+    multigrains: "multigrain",
+    lemon: "lime",
     tur: "toor",
     daal: "dal",
     mithu: "salt",
@@ -183,7 +197,8 @@ const VARIANT = new Set(
     "skimmed toned cream buffalo cow camel a2 gir banni pink rock black iron losodium peptide " +
     "dandruff menthol mint purple peppermint neem lime cologne icy original skincare tomato onion " +
     "masala double special cuppa chilly elaichi agni biryani pulav dubar classic everyday daily " +
-    "rozana super delight taaza moti shakti malai tofu khoa basundi koko calci kadai"
+    "rozana super delight taaza moti shakti malai tofu khoa basundi koko calci kadai " +
+    "floral lavender citrus rose jasmine choco chocolate caramel frappe cappuccino watermelon wings dryness sugar red green blue"
   ).split(" "),
 );
 
@@ -224,6 +239,35 @@ export function variantConflict(a: string[], b: string[]): number {
   for (const t of A) if (!B.has(t)) n++;
   for (const t of B) if (!A.has(t)) n++;
   return n;
+}
+
+/**
+ * Variant words for the clash check, read from the whole name. Unlike `canonTokens` this keeps
+ * bracketed asides, where Blinkit puts the fragrance ("Bathroom Cleaner (Lemon - 500 ml)"), and drops
+ * only the brand phrase itself, so the "Red" in "Red Bull … The Red Edition" still counts.
+ */
+export function variantWords(name: string, brand?: string | null): Set<string> {
+  const words = (x: string) =>
+    x
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter(Boolean);
+  // "Buy 3 Get 1 Free" is a promotion, not a variant, and would otherwise clash with "Sugar Free".
+  let s = ` ${words(name)
+    .join(" ")
+    .replace(/\bbuy \d+ get \d+ free\b/g, " ")} `;
+  if (brand) s = s.replace(` ${words(brand).join(" ")} `, " ");
+  const canon = words(s).map((t) => SYNONYMS.get(t) ?? SYNONYMS.get(deAmericanise(t)) ?? t);
+  return new Set(canon.filter((t) => VARIANT.has(t)));
+}
+
+/**
+ * Each side names a variant the other doesn't: Lemon vs Floral, Red Edition vs Green Edition.
+ * That is two different products, unlike a one-sided word, which is usually one listing just
+ * being terser ("Gold Milk" vs "Gold Homogenised Standardised Milk").
+ */
+export function variantClash(a: Set<string>, b: Set<string>): boolean {
+  return [...a].some((t) => !b.has(t)) && [...b].some((t) => !a.has(t));
 }
 
 // ---------------------------------------------------------------- similarity
@@ -313,6 +357,7 @@ export interface Prepared<T extends TaggedProduct = TaggedProduct> {
   brand: string | null;
   tokens: string[];
   grams: string[];
+  variants: Set<string>;
 }
 
 export function prepare<T extends TaggedProduct>(item: T): Prepared<T> {
@@ -322,6 +367,7 @@ export function prepare<T extends TaggedProduct>(item: T): Prepared<T> {
     brand: brandKey(item.brand),
     tokens: canonTokens(item.name, item.brand),
     grams: trigrams(item.name.toLowerCase()),
+    variants: variantWords(item.name, item.brand),
   };
 }
 
@@ -330,6 +376,7 @@ export function gatesPass(a: Prepared, b: Prepared): boolean {
   if (a.item.platform === b.item.platform) return false; // two SKUs in one store stay apart
   if (!qtyEq(a.qty, b.qty)) return false;
   if (a.brand && b.brand && a.brand !== b.brand) return false;
+  if (variantClash(a.variants, b.variants)) return false;
   return true;
 }
 
